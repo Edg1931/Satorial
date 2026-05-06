@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many } from "@/lib/db";
 import { dollars } from "@/lib/format";
 import { Card, Chip, Empty, PageHeader } from "@/components/ui";
 import type { Item, Style } from "@/lib/types";
@@ -8,8 +8,7 @@ export const dynamic = "force-dynamic";
 
 type Search = { view?: string; q?: string; cat?: string; filter?: string };
 
-function load(s: Search) {
-  const conn = db();
+async function load(s: Search) {
   const where: string[] = [];
   const params: any[] = [];
   if (s.q) {
@@ -21,14 +20,14 @@ function load(s: Search) {
   if (s.filter === "low") where.push("quantity <= reorder_point");
   if (s.filter === "rental") where.push("is_rental = 1");
   const sql = `SELECT * FROM items ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY category, name, color, size`;
-  const items = conn.prepare(sql).all(...params) as Item[];
-  const styles = conn.prepare("SELECT * FROM styles ORDER BY category, name").all() as Style[];
-  const categories = (conn.prepare("SELECT DISTINCT category FROM items ORDER BY category").all() as { category: string }[]).map((r) => r.category);
+  const items = await many<Item>(sql, params);
+  const styles = await many<Style>("SELECT * FROM styles ORDER BY category, name");
+  const categories = (await many<{ category: string }>("SELECT DISTINCT category FROM items ORDER BY category")).map((r) => r.category);
   return { items, styles, categories };
 }
 
-export default function InventoryPage({ searchParams }: { searchParams: Search }) {
-  const { items, styles, categories } = load(searchParams);
+export default async function InventoryPage({ searchParams }: { searchParams: Search }) {
+  const { items, styles, categories } = await load(searchParams);
   const view = searchParams.view === "list" ? "list" : "matrix";
   const totalUnits = items.reduce((a, b) => a + b.quantity, 0);
   const totalValue = items.reduce((a, b) => a + b.quantity * b.cost_cents, 0);

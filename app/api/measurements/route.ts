@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { exec } from "@/lib/db";
 
 export const runtime = "nodejs";
 
@@ -11,6 +11,6 @@ export async function POST(req: NextRequest) {
   const cols = ["customer_id", "taken_by", "notes", ...FIELDS];
   const placeholders = cols.map(() => "?").join(",");
   const values = cols.map((c) => body[c] ?? null);
-  const r = db().prepare(`INSERT INTO measurements (${cols.join(",")}) VALUES (${placeholders})`).run(...values);
-  return NextResponse.json({ id: Number(r.lastInsertRowid) });
+  const r = await exec(`INSERT INTO measurements (${cols.join(",")}) VALUES (${placeholders})`, values);
+  return NextResponse.json({ id: r.insertId });
 }

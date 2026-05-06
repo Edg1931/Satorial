@@ -4,7 +4,7 @@ export type EmailSendResult = { ok: boolean; id?: string; error?: string };
 export type SmsSendResult = { ok: boolean; id?: string; error?: string };
 
 export async function sendEmail(opts: { to: string; subject: string; html: string; from?: string }): Promise<EmailSendResult> {
-  const cfg = getConfig("resend") as { apiKey: string; from?: string } | null;
+  const cfg = (await getConfig("resend")) as { apiKey: string; from?: string } | null;
   if (!cfg?.apiKey) {
     return { ok: true, id: `sim-email-${Date.now()}` };
   }
@@ -28,7 +28,7 @@ export async function sendEmail(opts: { to: string; subject: string; html: strin
 }
 
 export async function sendSms(opts: { to: string; body: string }): Promise<SmsSendResult> {
-  const cfg = getConfig("twilio") as { accountSid: string; authToken: string; from: string } | null;
+  const cfg = (await getConfig("twilio")) as { accountSid: string; authToken: string; from: string } | null;
   if (!cfg?.accountSid || !cfg?.authToken) {
     return { ok: true, id: `sim-sms-${Date.now()}` };
   }

@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { many } from "@/lib/db";
 import { Card, PageHeader } from "@/components/ui";
 import { dollars } from "@/lib/format";
 import LookbookGenerator from "./generator";
@@ -6,10 +6,9 @@ import type { LookbookEntry, Item } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default function LookbookPage() {
-  const conn = db();
-  const items = conn.prepare(`SELECT id, sku, name, color, size, category, price_cents FROM items WHERE quantity > 0 ORDER BY category, name LIMIT 50`).all() as Item[];
-  const entries = conn.prepare(`SELECT * FROM lookbook ORDER BY created_at DESC LIMIT 50`).all() as LookbookEntry[];
+export default async function LookbookPage() {
+  const items = await many<Item>(`SELECT id, sku, name, color, size, category, price_cents FROM items WHERE quantity > 0 ORDER BY category, name LIMIT 50`);
+  const entries = await many<LookbookEntry>(`SELECT * FROM lookbook ORDER BY created_at DESC LIMIT 50`);
 
   return (
     <>

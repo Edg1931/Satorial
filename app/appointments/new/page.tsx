@@ -1,17 +1,16 @@
-import { db } from "@/lib/db";
+import { many } from "@/lib/db";
 import { Card, PageHeader } from "@/components/ui";
 import NewAppointmentForm from "./form";
 import type { Customer, GroupOrder } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default function NewAppointmentPage({ searchParams }: { searchParams: { customer_id?: string; group_id?: string; type?: string } }) {
-  const conn = db();
-  const customers = conn.prepare("SELECT * FROM customers ORDER BY name").all() as Customer[];
-  const groups = conn.prepare("SELECT * FROM group_orders ORDER BY event_date DESC").all() as GroupOrder[];
+export default async function NewAppointmentPage({ searchParams }: { searchParams: { customer_id?: string; group_id?: string; type?: string } }) {
+  const customers = await many<Customer>("SELECT * FROM customers ORDER BY name");
+  const groups = await many<GroupOrder>("SELECT * FROM group_orders ORDER BY event_date DESC");
   return (
     <>
-      <PageHeader eyebrow="Calendar" title="New Appointment" subtitle="Custom suit, rental, fitting, alteration, or consultation." />
+      <PageHeader eyebrow="Calendar" title="New Appointment" subtitle="Custom suit, rental, fitting, or consultation." />
       <Card>
         <NewAppointmentForm
           customers={customers}

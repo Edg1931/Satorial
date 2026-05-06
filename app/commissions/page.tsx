@@ -1,20 +1,19 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many } from "@/lib/db";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import { dollars, shortDate } from "@/lib/format";
 import MarkPaid from "./mark-paid";
 
 export const dynamic = "force-dynamic";
 
-export default function CommissionsPage() {
-  const conn = db();
-  const rows = conn.prepare(`
+export default async function CommissionsPage() {
+  const rows = (await many<any>(`
     SELECT c.*, s.name AS staff_name, sa.sold_at, sa.customer_name, sa.total_cents
     FROM commissions c
     JOIN staff s ON s.id = c.staff_id
     JOIN sales sa ON sa.id = c.sale_id
     ORDER BY c.created_at DESC LIMIT 200
-  `).all() as Array<{ id: number; sale_id: number; staff_id: number; percent: number; amount_cents: number; paid_at: string | null; staff_name: string; sold_at: string; customer_name: string | null; total_cents: number }>;
+  `)).map((r) => ({ ...r, percent: Number(r.percent), amount_cents: Number(r.amount_cents), total_cents: Number(r.total_cents) }));
 
   const byStaff = new Map<string, { unpaid: number; paid: number }>();
   for (const r of rows) {

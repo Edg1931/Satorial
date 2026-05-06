@@ -1,6 +1,6 @@
-import { db } from "./db";
+import { exec, one } from "./db";
 import type { Item } from "./types";
-import { getConfig, cloverAdjustStock, cloverPushSale } from "./integrations/clover";
+import { getConfig, cloverAdjustStock } from "./integrations/clover";
 
 export type ProposedAction = {
   id: string;
@@ -89,55 +89,50 @@ export const TOOLS = [
 export async function executeTool(tool: string, params: any): Promise<{ ok: boolean; result?: any; error?: string }> {
   try {
     switch (tool) {
-      case "adjust_inventory": return adjustInventory(params);
-      case "create_purchase_order_recommendation": return createPO(params);
-      case "draft_social_post": return draftSocial(params);
-      case "draft_campaign": return draftCampaign(params);
-      case "set_appointment_stage": return setStage(params);
+      case "adjust_inventory": return await adjustInventory(params);
+      case "create_purchase_order_recommendation": return await createPO(params);
+      case "draft_social_post": return await draftSocial(params);
+      case "draft_campaign": return await draftCampaign(params);
+      case "set_appointment_stage": return await setStage(params);
       default: return { ok: false, error: `Unknown tool: ${tool}` };
     }
   } catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
 }
 
-function adjustInventory({ item_id, sku, delta }: { item_id?: number; sku?: string; delta: number }) {
-  const conn = db();
+async function adjustInventory({ item_id, sku, delta }: { item_id?: number; sku?: string; delta: number }) {
   let item: Item | undefined;
-  if (item_id) item = conn.prepare("SELECT * FROM items WHERE id = ?").get(item_id) as Item | undefined;
-  else if (sku) item = conn.prepare("SELECT * FROM items WHERE sku = ?").get(sku) as Item | undefined;
+  if (item_id) item = await one<Item>("SELECT * FROM items WHERE id = ?", [item_id]);
+  else if (sku) item = await one<Item>("SELECT * FROM items WHERE sku = ?", [sku]);
   if (!item) return { ok: false, error: "Item not found" };
-  const next = Math.max(0, item.quantity + delta);
-  conn.prepare("UPDATE items SET quantity = ?, updated_at = datetime('now') WHERE id = ?").run(next, item.id);
-  const cfg = getConfig("clover");
+  const next = Math.max(0, Number(item.quantity) + Number(delta));
+  await exec("UPDATE items SET quantity = ?, updated_at = datetime('now') WHERE id = ?", [next, item.id]);
+  const cfg = await getConfig("clover");
   if (cfg) cloverAdjustStock(cfg as any, item.sku, delta).catch(() => {});
   return { ok: true, result: { item_id: item.id, sku: item.sku, previous: item.quantity, current: next } };
 }
 
-function createPO({ supplier, lines }: { supplier: string; lines: Array<{ name: string; sku?: string; quantity: number; unit_cost_cents?: number }> }) {
-  const conn = db();
+async function createPO({ supplier, lines }: { supplier: string; lines: Array<{ name: string; sku?: string; quantity: number; unit_cost_cents?: number }> }) {
   const total = lines.reduce((a, b) => a + (b.unit_cost_cents || 0) * b.quantity, 0);
-  const r = conn.prepare("INSERT INTO purchase_orders (supplier, total_cents, notes) VALUES (?, ?, 'Drafted by AI partner')").run(supplier, total);
-  const poId = Number(r.lastInsertRowid);
-  const ins = conn.prepare("INSERT INTO purchase_order_items (po_id, sku, name, quantity, unit_cost_cents) VALUES (?, ?, ?, ?, ?)");
-  for (const l of lines) ins.run(poId, l.sku || null, l.name, l.quantity, l.unit_cost_cents || 0);
-  return { ok: true, result: { id: poId, total_cents: total } };
+  const r = await exec("INSERT INTO purchase_orders (supplier, total_cents, notes) VALUES (?, ?, 'Drafted by AI partner')", [supplier, total]);
+  for (const l of lines) {
+    await exec("INSERT INTO purchase_order_items (po_id, sku, name, quantity, unit_cost_cents) VALUES (?, ?, ?, ?, ?)", [r.insertId, l.sku || null, l.name, l.quantity, l.unit_cost_cents || 0]);
+  }
+  return { ok: true, result: { id: r.insertId, total_cents: total } };
 }
 
-function draftSocial({ caption, hashtags, platforms, scheduled_for }: { caption: string; hashtags?: string[]; platforms: string[]; scheduled_for?: string }) {
-  const conn = db();
-  const r = conn.prepare(`INSERT INTO social_posts (caption, hashtags, platforms, status, scheduled_for, created_by) VALUES (?, ?, ?, ?, ?, 'ai')`)
-    .run(caption, (hashtags || []).join(" "), platforms.join(","), scheduled_for ? "scheduled" : "draft", scheduled_for || null);
-  return { ok: true, result: { id: Number(r.lastInsertRowid) } };
+async function draftSocial({ caption, hashtags, platforms, scheduled_for }: { caption: string; hashtags?: string[]; platforms: string[]; scheduled_for?: string }) {
+  const r = await exec(`INSERT INTO social_posts (caption, hashtags, platforms, status, scheduled_for, created_by) VALUES (?, ?, ?, ?, ?, 'ai')`,
+    [caption, (hashtags || []).join(" "), platforms.join(","), scheduled_for ? "scheduled" : "draft", scheduled_for || null]);
+  return { ok: true, result: { id: r.insertId } };
 }
 
-function draftCampaign({ name, channel, audience, subject, body }: { name: string; channel: string; audience?: string; subject?: string; body: string }) {
-  const conn = db();
-  const r = conn.prepare(`INSERT INTO campaigns (name, channel, audience, subject, body, status) VALUES (?, ?, ?, ?, ?, 'draft')`)
-    .run(name, channel, audience || "with_email", subject || null, body);
-  return { ok: true, result: { id: Number(r.lastInsertRowid) } };
+async function draftCampaign({ name, channel, audience, subject, body }: { name: string; channel: string; audience?: string; subject?: string; body: string }) {
+  const r = await exec(`INSERT INTO campaigns (name, channel, audience, subject, body, status) VALUES (?, ?, ?, ?, ?, 'draft')`,
+    [name, channel, audience || "with_email", subject || null, body]);
+  return { ok: true, result: { id: r.insertId } };
 }
 
-function setStage({ appointment_id, stage }: { appointment_id: number; stage: string }) {
-  const conn = db();
-  conn.prepare("UPDATE appointments SET stage = ?, updated_at = datetime('now') WHERE id = ?").run(stage, appointment_id);
+async function setStage({ appointment_id, stage }: { appointment_id: number; stage: string }) {
+  await exec("UPDATE appointments SET stage = ?, updated_at = datetime('now') WHERE id = ?", [stage, appointment_id]);
   return { ok: true, result: { appointment_id, stage } };
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { dollars, shortDate, shortDateTime } from "@/lib/format";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import type { Customer, Measurement, Appointment } from "@/lib/types";
@@ -20,21 +20,19 @@ const M_FIELDS: Array<{ k: keyof Measurement; label: string }> = [
   { k: "shoe_size", label: "Shoe size" },
 ];
 
-export default function CustomerDetail({ params }: { params: { id: string } }) {
-  const conn = db();
-  const customer = conn.prepare("SELECT * FROM customers WHERE id = ?").get(params.id) as Customer | undefined;
+export default async function CustomerDetail({ params }: { params: { id: string } }) {
+  const customer = await one<Customer>("SELECT * FROM customers WHERE id = ?", [params.id]);
   if (!customer) notFound();
-  const measurements = conn.prepare("SELECT * FROM measurements WHERE customer_id = ? ORDER BY taken_at DESC").all(customer.id) as Measurement[];
-  const appts = conn.prepare("SELECT * FROM appointments WHERE customer_id = ? ORDER BY appointment_date DESC").all(customer.id) as Appointment[];
-  const sales = conn.prepare("SELECT id, sold_at, total_cents FROM sales WHERE customer_id = ? ORDER BY sold_at DESC LIMIT 20").all(customer.id) as Array<{ id: number; sold_at: string; total_cents: number }>;
-  const lifetimeAll = (conn.prepare("SELECT COALESCE(SUM(total_cents),0) AS t FROM sales WHERE customer_id = ?").get(customer.id) as { t: number }).t;
-  const lifetime = lifetimeAll;
+  const measurements = await many<Measurement>("SELECT * FROM measurements WHERE customer_id = ? ORDER BY taken_at DESC", [customer.id]);
+  const appts = await many<Appointment>("SELECT * FROM appointments WHERE customer_id = ? ORDER BY appointment_date DESC", [customer.id]);
+  const sales = await many<{ id: number; sold_at: string; total_cents: number }>("SELECT id, sold_at, total_cents FROM sales WHERE customer_id = ? ORDER BY sold_at DESC LIMIT 20", [customer.id]);
+  const lifetime = Number((await one<{ t: number }>("SELECT COALESCE(SUM(total_cents),0) AS t FROM sales WHERE customer_id = ?", [customer.id]))!.t);
   const tier = tierFor(lifetime);
-  const wishlist = conn.prepare(`
+  const wishlist = await many<any>(`
     SELECT w.*, i.name AS item_name, i.color, i.size, i.quantity FROM wishlist w
     LEFT JOIN items i ON i.id = w.item_id WHERE w.customer_id = ? ORDER BY w.created_at DESC
-  `).all(customer.id) as Array<any>;
-  const referrals = conn.prepare("SELECT * FROM referrals WHERE referrer_customer_id = ? ORDER BY created_at DESC").all(customer.id) as Array<any>;
+  `, [customer.id]);
+  const referrals = await many<any>("SELECT * FROM referrals WHERE referrer_customer_id = ? ORDER BY created_at DESC", [customer.id]);
 
   return (
     <>

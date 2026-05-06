@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { many } from "@/lib/db";
 import { Card, Chip, PageHeader } from "@/components/ui";
 import StaffManager from "./staff";
 import IntegrationManager from "./integrations";
@@ -7,10 +7,9 @@ import type { Integration, Staff } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsPage() {
-  const conn = db();
-  const staff = conn.prepare("SELECT * FROM staff ORDER BY active DESC, name").all() as Staff[];
-  const integrations = conn.prepare("SELECT * FROM integrations ORDER BY provider").all() as Integration[];
+export default async function SettingsPage() {
+  const staff = await many<Staff>("SELECT * FROM staff ORDER BY active DESC, name");
+  const integrations = await many<Integration>("SELECT * FROM integrations ORDER BY provider");
 
   return (
     <>
@@ -29,8 +28,9 @@ export default function SettingsPage() {
           </div>
         </Card>
         <Card title="Database">
-          <div className="text-sm">
-            SQLite at <span className="kbd">data/satorial.db</span>. Override with <span className="kbd">SATORIAL_DB_PATH</span>.
+          <div className="text-sm space-y-1">
+            <div>libsql / SQLite. Set <span className="kbd">TURSO_DATABASE_URL</span> + <span className="kbd">TURSO_AUTH_TOKEN</span> for hosted (Vercel-friendly).</div>
+            <div className="text-xs text-[var(--ink-mute)]">Local dev defaults to <span className="kbd">file:./data/satorial.db</span>. Vercel without Turso uses <span className="kbd">file:/tmp/satorial.db</span> (ephemeral).</div>
           </div>
         </Card>
       </div>

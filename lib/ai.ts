@@ -1,6 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { db } from "./db";
-import type { Item, Sale, SaleItem, Appointment } from "./types";
+import { many, one } from "./db";
 import { TOOLS, type ProposedAction } from "./ai-tools";
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
@@ -22,84 +21,60 @@ export type AISnapshot = {
   finance: { last30Revenue: number; estimatedCogs: number; estimatedMargin: number };
 };
 
-export function snapshot(): AISnapshot {
-  const conn = db();
-  const lowStock = conn.prepare(`
+export async function snapshot(): Promise<AISnapshot> {
+  const lowStock = await many<AISnapshot["inventory"]["lowStock"][number]>(`
     SELECT name, size, color, quantity, reorder_point
-    FROM items
-    WHERE quantity <= reorder_point
-    ORDER BY (reorder_point - quantity) DESC
-    LIMIT 25
-  `).all() as AISnapshot["inventory"]["lowStock"];
-
-  const totals = conn.prepare(`SELECT COUNT(*) as skus, COALESCE(SUM(quantity), 0) as units FROM items`).get() as { skus: number; units: number };
-
-  const last30 = conn.prepare(`
+    FROM items WHERE quantity <= reorder_point
+    ORDER BY (reorder_point - quantity) DESC LIMIT 25`);
+  const totals = (await one<{ skus: number; units: number }>(`SELECT COUNT(*) as skus, COALESCE(SUM(quantity), 0) as units FROM items`))!;
+  const last30 = (await one<{ rev: number; units: number }>(`
     SELECT COALESCE(SUM(s.total_cents), 0) AS rev,
            COALESCE(SUM(si.quantity), 0) AS units
     FROM sales s LEFT JOIN sale_items si ON si.sale_id = s.id
-    WHERE s.sold_at >= datetime('now', '-30 days')
-  `).get() as { rev: number; units: number };
-
-  const topSizes = conn.prepare(`
+    WHERE s.sold_at >= datetime('now', '-30 days')`))!;
+  const topSizes = await many<{ category: string; size: string; units: number }>(`
     SELECT category_at_sale AS category, COALESCE(size_at_sale, '—') AS size, SUM(quantity) AS units
     FROM sale_items si JOIN sales s ON s.id = si.sale_id
     WHERE s.sold_at >= datetime('now', '-90 days')
-    GROUP BY category_at_sale, size_at_sale
-    ORDER BY units DESC
-    LIMIT 10
-  `).all() as Array<{ category: string; size: string; units: number }>;
-
-  const topItems = conn.prepare(`
+    GROUP BY category_at_sale, size_at_sale ORDER BY units DESC LIMIT 10`);
+  const topItems = await many<{ name: string; units: number; revenue: number }>(`
     SELECT name_at_sale AS name, SUM(quantity) AS units, SUM(quantity * unit_price_cents) AS revenue
     FROM sale_items si JOIN sales s ON s.id = si.sale_id
     WHERE s.sold_at >= datetime('now', '-90 days')
-    GROUP BY name_at_sale
-    ORDER BY units DESC
-    LIMIT 8
-  `).all() as Array<{ name: string; units: number; revenue: number }>;
-
-  const upcoming = conn.prepare(`
+    GROUP BY name_at_sale ORDER BY units DESC LIMIT 8`);
+  const upcoming = await many<AISnapshot["appointments"]["upcoming"][number]>(`
     SELECT id, type, customer_name, appointment_date, event_date, stage
-    FROM appointments
-    WHERE status = 'open' AND appointment_date >= datetime('now', '-1 days')
-    ORDER BY appointment_date ASC
-    LIMIT 10
-  `).all() as AISnapshot["appointments"]["upcoming"];
-
-  const atRisk = conn.prepare(`
+    FROM appointments WHERE status = 'open' AND appointment_date >= datetime('now', '-1 days')
+    ORDER BY appointment_date ASC LIMIT 10`);
+  const atRisk = await many<{ id: number; customer_name: string; reason: string | null }>(`
     SELECT id, customer_name,
            CASE
              WHEN event_date IS NOT NULL AND date(event_date) <= date('now', '+7 days') AND stage NOT IN ('ready','delivered','cancelled') THEN 'Event in <=7d, garment not ready'
              WHEN garment_expected_date IS NOT NULL AND date(garment_expected_date) < date('now') AND stage NOT IN ('ready','delivered','cancelled') THEN 'Past expected date'
              ELSE NULL
            END AS reason
-    FROM appointments
-    WHERE status = 'open'
-  `).all() as Array<{ id: number; customer_name: string; reason: string | null }>;
-
-  const cogs = conn.prepare(`
+    FROM appointments WHERE status = 'open'`);
+  const cogs = (await one<{ cogs: number }>(`
     SELECT COALESCE(SUM(si.quantity * i.cost_cents), 0) AS cogs
     FROM sale_items si JOIN sales s ON s.id = si.sale_id JOIN items i ON i.id = si.item_id
-    WHERE s.sold_at >= datetime('now', '-30 days')
-  `).get() as { cogs: number };
+    WHERE s.sold_at >= datetime('now', '-30 days')`))!;
 
   return {
-    inventory: { totalSkus: totals.skus, totalUnits: totals.units, lowStock },
+    inventory: { totalSkus: Number(totals.skus), totalUnits: Number(totals.units), lowStock },
     sales: {
-      last30Revenue: last30.rev,
-      last30Units: last30.units,
-      topSizes,
-      topItems: topItems.map((t) => ({ name: t.name, units: t.units, revenue: t.revenue })),
+      last30Revenue: Number(last30.rev),
+      last30Units: Number(last30.units),
+      topSizes: topSizes.map((t) => ({ ...t, units: Number(t.units) })),
+      topItems: topItems.map((t) => ({ name: t.name, units: Number(t.units), revenue: Number(t.revenue) })),
     },
     appointments: {
       upcoming,
       atRisk: atRisk.filter((r) => r.reason).map((r) => ({ id: r.id, customer_name: r.customer_name, reason: r.reason as string })),
     },
     finance: {
-      last30Revenue: last30.rev,
-      estimatedCogs: cogs.cogs,
-      estimatedMargin: last30.rev > 0 ? (last30.rev - cogs.cogs) / last30.rev : 0,
+      last30Revenue: Number(last30.rev),
+      estimatedCogs: Number(cogs.cogs),
+      estimatedMargin: Number(last30.rev) > 0 ? (Number(last30.rev) - Number(cogs.cogs)) / Number(last30.rev) : 0,
     },
   };
 }
@@ -124,10 +99,10 @@ export async function aiChat(opts: {
   contextHint?: string;
 }): Promise<{ text: string; actions: ProposedAction[] }> {
   if (!aiEnabled()) {
-    return { text: offlineFallback(opts.userMessage), actions: [] };
+    return { text: await offlineFallback(opts.userMessage), actions: [] };
   }
 
-  const snap = snapshot();
+  const snap = await snapshot();
   const messages = [
     ...(opts.history || []).map((m) => ({ role: m.role, content: m.content })),
     {
@@ -190,7 +165,7 @@ export async function generateSocialPost(opts: {
     };
   }
 
-  const snap = snapshot();
+  const snap = await snapshot();
   const sys = `You write social media copy for Satorial, a refined men's retail/tailoring brand.
 Voice: confident, sartorial, understated. No exclamation points unless tasteful. No emoji-spam (max 1).
 Return STRICT JSON: { "caption": string, "hashtags": string[], "perPlatform": { [platform]: string } }
@@ -235,8 +210,8 @@ function extractJson(text: string): any {
   }
 }
 
-function offlineFallback(_q: string): string {
-  const s = snapshot();
+async function offlineFallback(_q: string): Promise<string> {
+  const s = await snapshot();
   const lines = [
     "**AI offline** — set `ANTHROPIC_API_KEY` to enable live answers. Live snapshot:",
     `• Inventory: **${s.inventory.totalUnits} units** across **${s.inventory.totalSkus} SKUs** — ${s.inventory.lowStock.length} below reorder point.`,

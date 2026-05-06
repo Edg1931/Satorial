@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many } from "@/lib/db";
 import { Card, Chip, Empty, PageHeader } from "@/components/ui";
 import { dollars, relativeDate, shortDate, shortDateTime, daysFromNow } from "@/lib/format";
 import type { Appointment, GroupOrder } from "@/lib/types";
@@ -8,8 +8,7 @@ export const dynamic = "force-dynamic";
 
 type Search = { type?: string; stage?: string; q?: string };
 
-export default function AppointmentsPage({ searchParams }: { searchParams: Search }) {
-  const conn = db();
+export default async function AppointmentsPage({ searchParams }: { searchParams: Search }) {
   const where: string[] = [];
   const params: any[] = [];
   if (searchParams.type && searchParams.type !== "all") { where.push("type = ?"); params.push(searchParams.type); }
@@ -19,11 +18,11 @@ export default function AppointmentsPage({ searchParams }: { searchParams: Searc
     const q = `%${searchParams.q}%`;
     params.push(q, q, q);
   }
-  const appts = conn.prepare(
-    `SELECT * FROM appointments ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY appointment_date DESC`
-  ).all(...params) as Appointment[];
-
-  const groups = conn.prepare("SELECT * FROM group_orders ORDER BY event_date ASC").all() as GroupOrder[];
+  const appts = await many<Appointment>(
+    `SELECT * FROM appointments ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY appointment_date DESC`,
+    params
+  );
+  const groups = await many<GroupOrder>("SELECT * FROM group_orders ORDER BY event_date ASC");
 
   const upcoming = appts.filter((a) => {
     const d = daysFromNow(a.appointment_date);

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { Card, PageHeader, Stat } from "@/components/ui";
 import { dollars, shortDate } from "@/lib/format";
 import FinanceCharts from "./charts";
@@ -7,47 +7,46 @@ import CashFlowChart from "./cashflow";
 
 export const dynamic = "force-dynamic";
 
-function loadFinance() {
-  const conn = db();
+const num = (v: any) => Number(v || 0);
 
-  const rev = conn.prepare(`
+async function loadFinance() {
+  const revRaw = (await one<any>(`
     SELECT
       COALESCE(SUM(CASE WHEN sold_at >= datetime('now','-30 days') THEN total_cents END),0) AS r30,
       COALESCE(SUM(CASE WHEN sold_at >= datetime('now','-60 days') AND sold_at < datetime('now','-30 days') THEN total_cents END),0) AS rPrev30,
       COALESCE(SUM(CASE WHEN sold_at >= datetime('now','-365 days') THEN total_cents END),0) AS r365,
       COALESCE(SUM(total_cents),0) AS rAll
-    FROM sales
-  `).get() as { r30: number; rPrev30: number; r365: number; rAll: number };
+    FROM sales`))!;
+  const rev = { r30: num(revRaw.r30), rPrev30: num(revRaw.rPrev30), r365: num(revRaw.r365), rAll: num(revRaw.rAll) };
 
-  const cogs = conn.prepare(`
+  const cogsRaw = (await one<any>(`
     SELECT
       COALESCE(SUM(CASE WHEN s.sold_at >= datetime('now','-30 days') THEN si.quantity*i.cost_cents END),0) AS c30,
       COALESCE(SUM(CASE WHEN s.sold_at >= datetime('now','-365 days') THEN si.quantity*i.cost_cents END),0) AS c365
-    FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN items i ON i.id=si.item_id
-  `).get() as { c30: number; c365: number };
+    FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN items i ON i.id=si.item_id`))!;
+  const cogs = { c30: num(cogsRaw.c30), c365: num(cogsRaw.c365) };
 
-  const expenses = conn.prepare(`
+  const expRaw = (await one<any>(`
     SELECT
       COALESCE(SUM(CASE WHEN occurred_at >= datetime('now','-30 days') THEN amount_cents END),0) AS e30,
       COALESCE(SUM(CASE WHEN occurred_at >= datetime('now','-365 days') THEN amount_cents END),0) AS e365
-    FROM expenses
-  `).get() as { e30: number; e365: number };
+    FROM expenses`))!;
+  const expenses = { e30: num(expRaw.e30), e365: num(expRaw.e365) };
 
-  const expenseCats = conn.prepare(`
+  const expenseCats = (await many<any>(`
     SELECT category, SUM(amount_cents) AS total FROM expenses
     WHERE occurred_at >= datetime('now','-90 days')
-    GROUP BY category ORDER BY total DESC
-  `).all() as Array<{ category: string; total: number }>;
+    GROUP BY category ORDER BY total DESC`)).map((r) => ({ ...r, total: num(r.total) }));
 
-  const inventory = conn.prepare(`
-    SELECT COALESCE(SUM(quantity*cost_cents),0) AS at_cost, COALESCE(SUM(quantity*price_cents),0) AS at_retail FROM items
-  `).get() as { at_cost: number; at_retail: number };
+  const invRaw = (await one<any>(`
+    SELECT COALESCE(SUM(quantity*cost_cents),0) AS at_cost, COALESCE(SUM(quantity*price_cents),0) AS at_retail FROM items`))!;
+  const inventory = { at_cost: num(invRaw.at_cost), at_retail: num(invRaw.at_retail) };
 
-  const purchaseOrders = conn.prepare(`
-    SELECT COALESCE(SUM(total_cents),0) AS open_total FROM purchase_orders WHERE status IN ('open','partial')
-  `).get() as { open_total: number };
+  const poRaw = (await one<any>(`
+    SELECT COALESCE(SUM(total_cents),0) AS open_total FROM purchase_orders WHERE status IN ('open','partial')`))!;
+  const purchaseOrders = { open_total: num(poRaw.open_total) };
 
-  const deferred = conn.prepare(`
+  const defRaw = (await one<any>(`
     SELECT
       COALESCE(SUM(CASE WHEN type='custom_suit' THEN balance_cents END),0) AS suit_balance,
       COALESCE(SUM(CASE WHEN type='custom_suit' THEN total_cents END),0) AS suit_total,
@@ -55,42 +54,41 @@ function loadFinance() {
       COALESCE(SUM(CASE WHEN type='rental' THEN balance_cents END),0) AS rental_balance,
       COALESCE(SUM(CASE WHEN type='rental' THEN total_cents END),0) AS rental_total,
       COALESCE(SUM(CASE WHEN type='rental' THEN deposit_cents END),0) AS rental_deposit
-    FROM appointments WHERE status = 'open'
-  `).get() as { suit_balance: number; suit_total: number; suit_deposit: number; rental_balance: number; rental_total: number; rental_deposit: number };
+    FROM appointments WHERE status = 'open'`))!;
+  const deferred = {
+    suit_balance: num(defRaw.suit_balance), suit_total: num(defRaw.suit_total), suit_deposit: num(defRaw.suit_deposit),
+    rental_balance: num(defRaw.rental_balance), rental_total: num(defRaw.rental_total), rental_deposit: num(defRaw.rental_deposit),
+  };
 
-  const dailyRev = conn.prepare(`
+  const dailyRev = (await many<any>(`
     SELECT date(sold_at) AS d, SUM(total_cents) AS rev
     FROM sales WHERE sold_at >= datetime('now','-89 days')
-    GROUP BY date(sold_at) ORDER BY d ASC
-  `).all() as Array<{ d: string; rev: number }>;
+    GROUP BY date(sold_at) ORDER BY d ASC`)).map((r) => ({ d: r.d, rev: num(r.rev) }));
 
-  const upcomingDeposits = conn.prepare(`
+  const upcomingDeposits = (await many<any>(`
     SELECT id, customer_name, type, event_date, balance_cents
     FROM appointments
     WHERE status='open' AND balance_cents > 0
-    ORDER BY COALESCE(event_date, appointment_date) ASC LIMIT 12
-  `).all() as Array<{ id: number; customer_name: string; type: string; event_date: string | null; balance_cents: number }>;
+    ORDER BY COALESCE(event_date, appointment_date) ASC LIMIT 12`)).map((r) => ({ ...r, balance_cents: num(r.balance_cents) }));
 
-  const recentExpenses = conn.prepare(`SELECT * FROM expenses ORDER BY occurred_at DESC LIMIT 8`).all() as Array<{ id: number; occurred_at: string; category: string; amount_cents: number; vendor: string | null }>;
-  const openPOs = conn.prepare(`SELECT * FROM purchase_orders WHERE status IN ('open','partial') ORDER BY ordered_at DESC LIMIT 8`).all() as Array<{ id: number; supplier: string; ordered_at: string; expected_at: string | null; total_cents: number; status: string }>;
+  const recentExpenses = (await many<any>(`SELECT * FROM expenses ORDER BY occurred_at DESC LIMIT 8`)).map((r) => ({ ...r, amount_cents: num(r.amount_cents) }));
+  const openPOs = (await many<any>(`SELECT * FROM purchase_orders WHERE status IN ('open','partial') ORDER BY ordered_at DESC LIMIT 8`)).map((r) => ({ ...r, total_cents: num(r.total_cents) }));
 
-  const inflowAppt = conn.prepare(`
+  const inflowAppt = (await many<any>(`
     SELECT date(COALESCE(event_date, appointment_date)) AS d, SUM(balance_cents) AS amt
     FROM appointments
     WHERE status = 'open' AND balance_cents > 0
       AND date(COALESCE(event_date, appointment_date)) BETWEEN date('now') AND date('now','+90 days')
-    GROUP BY d ORDER BY d
-  `).all() as Array<{ d: string; amt: number }>;
+    GROUP BY d ORDER BY d`)).map((r) => ({ d: r.d, amt: num(r.amt) }));
 
-  const outflowPO = conn.prepare(`
+  const outflowPO = (await many<any>(`
     SELECT date(COALESCE(expected_at, ordered_at)) AS d, SUM(total_cents) AS amt
     FROM purchase_orders
     WHERE status IN ('open','partial')
       AND date(COALESCE(expected_at, ordered_at)) BETWEEN date('now') AND date('now','+90 days')
-    GROUP BY d ORDER BY d
-  `).all() as Array<{ d: string; amt: number }>;
+    GROUP BY d ORDER BY d`)).map((r) => ({ d: r.d, amt: num(r.amt) }));
 
-  const dailyExpenseAvg = (conn.prepare(`SELECT COALESCE(SUM(amount_cents),0)/90.0 AS avg FROM expenses WHERE occurred_at >= datetime('now','-90 days')`).get() as { avg: number }).avg;
+  const dailyExpenseAvg = num((await one<any>(`SELECT COALESCE(SUM(amount_cents),0)/90.0 AS avg FROM expenses WHERE occurred_at >= datetime('now','-90 days')`))!.avg);
   const cashflow = buildCashflow(inflowAppt, outflowPO, dailyExpenseAvg);
 
   const gp30 = rev.r30 - cogs.c30;
@@ -116,8 +114,8 @@ function buildCashflow(inflows: Array<{ d: string; amt: number }>, outflows: Arr
   return days;
 }
 
-export default function FinancePage() {
-  const f = loadFinance();
+export default async function FinancePage() {
+  const f = await loadFinance();
   const futureBookedRev = f.deferred.suit_total + f.deferred.rental_total;
   const futureRevToCollect = f.deferred.suit_balance + f.deferred.rental_balance;
 

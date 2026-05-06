@@ -1,81 +1,62 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { dollars, relativeDate, shortDate } from "@/lib/format";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-function dashboardData() {
-  const conn = db();
-
-  const totals = conn.prepare(`SELECT COUNT(*) as skus, COALESCE(SUM(quantity),0) as units, COALESCE(SUM(quantity*cost_cents),0) as inv_value FROM items`).get() as { skus: number; units: number; inv_value: number };
-
-  const last30 = conn.prepare(`
-    SELECT COALESCE(SUM(s.total_cents),0) AS rev,
-           COUNT(DISTINCT s.id) AS orders,
-           COALESCE(SUM(si.quantity),0) AS units
+async function dashboardData() {
+  const totals = (await one<{ skus: number; units: number; inv_value: number }>(`SELECT COUNT(*) as skus, COALESCE(SUM(quantity),0) as units, COALESCE(SUM(quantity*cost_cents),0) as inv_value FROM items`))!;
+  const last30 = (await one<{ rev: number; orders: number; units: number }>(`
+    SELECT COALESCE(SUM(s.total_cents),0) AS rev, COUNT(DISTINCT s.id) AS orders, COALESCE(SUM(si.quantity),0) AS units
     FROM sales s LEFT JOIN sale_items si ON si.sale_id = s.id
-    WHERE s.sold_at >= datetime('now','-30 days')
-  `).get() as { rev: number; orders: number; units: number };
-
-  const prev30 = conn.prepare(`
+    WHERE s.sold_at >= datetime('now','-30 days')`))!;
+  const prev30 = (await one<{ rev: number }>(`
     SELECT COALESCE(SUM(total_cents),0) AS rev FROM sales
-    WHERE sold_at >= datetime('now','-60 days') AND sold_at < datetime('now','-30 days')
-  `).get() as { rev: number };
-
-  const cogs = conn.prepare(`
+    WHERE sold_at >= datetime('now','-60 days') AND sold_at < datetime('now','-30 days')`))!;
+  const cogs = (await one<{ cogs: number }>(`
     SELECT COALESCE(SUM(si.quantity*i.cost_cents),0) AS cogs
     FROM sale_items si JOIN sales s ON s.id=si.sale_id JOIN items i ON i.id=si.item_id
-    WHERE s.sold_at >= datetime('now','-30 days')
-  `).get() as { cogs: number };
-
-  const lowStock = conn.prepare(`
-    SELECT id, name, color, size, quantity, reorder_point
-    FROM items WHERE quantity <= reorder_point ORDER BY (reorder_point-quantity) DESC LIMIT 6
-  `).all() as Array<{ id: number; name: string; color: string | null; size: string | null; quantity: number; reorder_point: number }>;
-
-  const upcoming = conn.prepare(`
+    WHERE s.sold_at >= datetime('now','-30 days')`))!;
+  const lowStock = await many<{ id: number; name: string; color: string | null; size: string | null; quantity: number; reorder_point: number }>(`
+    SELECT id, name, color, size, quantity, reorder_point FROM items WHERE quantity <= reorder_point ORDER BY (reorder_point-quantity) DESC LIMIT 6`);
+  const upcoming = await many<{ id: number; type: string; customer_name: string; appointment_date: string; event_date: string | null; stage: string }>(`
     SELECT id, type, customer_name, appointment_date, event_date, stage
     FROM appointments WHERE status='open' AND appointment_date >= datetime('now','-1 days')
-    ORDER BY appointment_date ASC LIMIT 6
-  `).all() as Array<{ id: number; type: string; customer_name: string; appointment_date: string; event_date: string | null; stage: string }>;
-
-  const dueSoon = conn.prepare(`
-    SELECT id, customer_name, event_date, stage
-    FROM appointments
-    WHERE status='open'
-      AND event_date IS NOT NULL
+    ORDER BY appointment_date ASC LIMIT 6`);
+  const dueSoon = await many<{ id: number; customer_name: string; event_date: string; stage: string }>(`
+    SELECT id, customer_name, event_date, stage FROM appointments
+    WHERE status='open' AND event_date IS NOT NULL
       AND date(event_date) BETWEEN date('now') AND date('now','+14 days')
       AND stage NOT IN ('ready','delivered','cancelled')
-    ORDER BY event_date ASC
-  `).all() as Array<{ id: number; customer_name: string; event_date: string; stage: string }>;
-
-  const lateRentals = conn.prepare(`
-    SELECT id, customer_name, rental_return_date
-    FROM appointments
-    WHERE type='rental' AND status='open'
-      AND rental_return_date IS NOT NULL
-      AND date(rental_return_date) < date('now')
-      AND rental_state IN ('out','late')
-    ORDER BY rental_return_date ASC
-  `).all() as Array<{ id: number; customer_name: string; rental_return_date: string }>;
-
-  const topSizes = conn.prepare(`
+    ORDER BY event_date ASC`);
+  const lateRentals = await many<{ id: number; customer_name: string; rental_return_date: string }>(`
+    SELECT id, customer_name, rental_return_date FROM appointments
+    WHERE type='rental' AND status='open' AND rental_return_date IS NOT NULL
+      AND date(rental_return_date) < date('now') AND rental_state IN ('out','late')
+    ORDER BY rental_return_date ASC`);
+  const topSizes = await many<{ category: string; size: string; units: number }>(`
     SELECT category_at_sale AS category, COALESCE(size_at_sale,'—') AS size, SUM(quantity) AS units
     FROM sale_items si JOIN sales s ON s.id=si.sale_id
     WHERE s.sold_at >= datetime('now','-90 days')
-    GROUP BY category_at_sale, size_at_sale
-    ORDER BY units DESC LIMIT 6
-  `).all() as Array<{ category: string; size: string; units: number }>;
+    GROUP BY category_at_sale, size_at_sale ORDER BY units DESC LIMIT 6`);
 
-  const margin = last30.rev > 0 ? (last30.rev - cogs.cogs) / last30.rev : 0;
-  const trend = prev30.rev > 0 ? ((last30.rev - prev30.rev) / prev30.rev) * 100 : null;
+  const last30rev = Number(last30.rev);
+  const cogsVal = Number(cogs.cogs);
+  const margin = last30rev > 0 ? (last30rev - cogsVal) / last30rev : 0;
+  const trend = Number(prev30.rev) > 0 ? ((last30rev - Number(prev30.rev)) / Number(prev30.rev)) * 100 : null;
 
-  return { totals, last30, cogs, margin, trend, lowStock, upcoming, dueSoon, lateRentals, topSizes };
+  return {
+    totals: { skus: Number(totals.skus), units: Number(totals.units), inv_value: Number(totals.inv_value) },
+    last30: { rev: last30rev, orders: Number(last30.orders), units: Number(last30.units) },
+    cogs: { cogs: cogsVal },
+    margin, trend, lowStock, upcoming, dueSoon, lateRentals,
+    topSizes: topSizes.map((t) => ({ ...t, units: Number(t.units) })),
+  };
 }
 
-export default function DashboardPage() {
-  const d = dashboardData();
+export default async function DashboardPage() {
+  const d = await dashboardData();
   return (
     <>
       <PageHeader

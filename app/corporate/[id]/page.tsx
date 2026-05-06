@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { Card, PageHeader, Stat } from "@/components/ui";
 import { dollars } from "@/lib/format";
 import type { CorporateAccount, CorporateEmployee } from "@/lib/types";
@@ -7,13 +7,12 @@ import EmployeeManager from "./employees";
 
 export const dynamic = "force-dynamic";
 
-export default function CorporateAccountDetail({ params }: { params: { id: string } }) {
-  const conn = db();
-  const a = conn.prepare("SELECT * FROM corporate_accounts WHERE id = ?").get(params.id) as CorporateAccount | undefined;
+export default async function CorporateAccountDetail({ params }: { params: { id: string } }) {
+  const a = await one<CorporateAccount>("SELECT * FROM corporate_accounts WHERE id = ?", [params.id]);
   if (!a) notFound();
-  const employees = conn.prepare("SELECT * FROM corporate_employees WHERE account_id = ? ORDER BY name").all(a.id) as CorporateEmployee[];
-  const balance = employees.reduce((acc, e) => acc + e.stipend_balance_cents, 0);
-  const allocated = a.stipend_cents * employees.length;
+  const employees = await many<CorporateEmployee>("SELECT * FROM corporate_employees WHERE account_id = ? ORDER BY name", [a.id]);
+  const balance = employees.reduce((acc, e) => acc + Number(e.stipend_balance_cents), 0);
+  const allocated = Number(a.stipend_cents) * employees.length;
 
   return (
     <>

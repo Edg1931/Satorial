@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import { dollars, relativeDate, shortDate, shortDateTime } from "@/lib/format";
 import type { Appointment, GroupOrder } from "@/lib/types";
@@ -8,15 +8,14 @@ import PortalLink from "./portal-link";
 
 export const dynamic = "force-dynamic";
 
-export default function GroupDetail({ params }: { params: { id: string } }) {
-  const conn = db();
-  const g = conn.prepare("SELECT * FROM group_orders WHERE id = ?").get(params.id) as GroupOrder | undefined;
+export default async function GroupDetail({ params }: { params: { id: string } }) {
+  const g = await one<GroupOrder>("SELECT * FROM group_orders WHERE id = ?", [params.id]);
   if (!g) notFound();
-  const members = conn.prepare("SELECT * FROM appointments WHERE group_order_id = ? ORDER BY customer_name").all(g.id) as Appointment[];
-  const portal = conn.prepare("SELECT token FROM wedding_portals WHERE group_order_id = ?").get(g.id) as { token: string } | undefined;
+  const members = await many<Appointment>("SELECT * FROM appointments WHERE group_order_id = ? ORDER BY customer_name", [g.id]);
+  const portal = await one<{ token: string }>("SELECT token FROM wedding_portals WHERE group_order_id = ?", [g.id]);
   const ready = members.filter((m) => m.stage === "ready" || m.stage === "delivered").length;
-  const total = members.reduce((a, b) => a + b.total_cents, 0);
-  const balance = members.reduce((a, b) => a + b.balance_cents, 0);
+  const total = members.reduce((a, b) => a + Number(b.total_cents), 0);
+  const balance = members.reduce((a, b) => a + Number(b.balance_cents), 0);
 
   return (
     <>

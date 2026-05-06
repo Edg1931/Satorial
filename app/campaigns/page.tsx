@@ -1,31 +1,30 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import { shortDate } from "@/lib/format";
 import type { Campaign } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-function load() {
-  const conn = db();
-  const campaigns = conn.prepare("SELECT * FROM campaigns ORDER BY created_at DESC LIMIT 50").all() as Campaign[];
+async function load() {
+  const campaigns = await many<Campaign>("SELECT * FROM campaigns ORDER BY created_at DESC LIMIT 50");
 
   const today = new Date();
   const month = today.getMonth() + 1;
   const day = today.getDate();
-  const birthdays = conn.prepare(`
+  const birthdays = await many<{ id: number; name: string; birthday: string; email: string | null; phone: string | null }>(`
     SELECT id, name, birthday, email, phone FROM customers
     WHERE birthday IS NOT NULL AND CAST(strftime('%m', birthday) AS INTEGER) = ? AND CAST(strftime('%d', birthday) AS INTEGER) BETWEEN ? AND ?
     ORDER BY strftime('%d', birthday) ASC
-  `).all(month, day, day + 14) as Array<{ id: number; name: string; birthday: string; email: string | null; phone: string | null }>;
+  `, [month, day, day + 14]);
 
-  const recentSent = conn.prepare("SELECT COUNT(*) AS c FROM campaign_sends WHERE sent_at >= datetime('now','-30 days') AND status='ok'").get() as { c: number };
+  const recentSent = Number((await one<{ c: number }>("SELECT COUNT(*) AS c FROM campaign_sends WHERE sent_at >= datetime('now','-30 days') AND status='ok'"))!.c);
 
-  return { campaigns, birthdays, recentSent: recentSent.c };
+  return { campaigns, birthdays, recentSent };
 }
 
-export default function CampaignsPage() {
-  const { campaigns, birthdays, recentSent } = load();
+export default async function CampaignsPage() {
+  const { campaigns, birthdays, recentSent } = await load();
   return (
     <>
       <PageHeader

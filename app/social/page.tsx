@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many } from "@/lib/db";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import { shortDateTime } from "@/lib/format";
 import type { SocialConnection, SocialPost } from "@/lib/types";
@@ -9,10 +9,9 @@ import { PLATFORM_META } from "@/lib/social/connectors";
 
 export const dynamic = "force-dynamic";
 
-export default function SocialPage() {
-  const conn = db();
-  const connections = conn.prepare("SELECT * FROM social_connections ORDER BY platform").all() as SocialConnection[];
-  const posts = conn.prepare("SELECT * FROM social_posts ORDER BY created_at DESC LIMIT 20").all() as SocialPost[];
+export default async function SocialPage() {
+  const connections = await many<SocialConnection>("SELECT * FROM social_connections ORDER BY platform");
+  const posts = await many<SocialPost>("SELECT * FROM social_posts ORDER BY created_at DESC LIMIT 20");
 
   const scheduled = posts.filter((p) => p.status === "scheduled").length;
   const posted = posts.filter((p) => p.status === "posted").length;

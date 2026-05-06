@@ -73,48 +73,55 @@ ai_actions                     — log of AI-proposed actions executed
 
 ## Deployment
 
-### TL;DR
+The app uses [`@libsql/client`](https://github.com/tursodatabase/libsql-client-ts) for the database, which works in three modes:
 
-| Host | Persistent data | Setup difficulty | Recommendation |
-|------|-----------------|------------------|----------------|
-| **Railway / Render / Fly.io** | ✅ persistent disk for SQLite | Easy | **Best for this app** |
-| **Vercel** + Turso/libsql | ✅ remote SQLite | Medium | Good for production on Vercel |
-| **Vercel** (file-based) | ⚠️ data wiped between cold starts | Easiest | Only for demo / preview |
+| Mode | URL | Persistent? | Where it shines |
+|------|-----|-------------|-----------------|
+| **Local file** (default for dev) | `file:./data/satorial.db` | Yes (local disk) | Local development |
+| **Vercel `/tmp`** (auto-detected) | `file:/tmp/satorial.db` | ⚠️ ephemeral | Quick Vercel preview |
+| **Turso / libsql remote** | `libsql://yourdb.turso.io` | Yes (hosted) | **Production on Vercel** |
 
-### Vercel (preview / demo only)
+### Vercel + Turso (recommended for production)
 
-Vercel's filesystem is read-only outside `/tmp`, and `/tmp` is wiped between
-cold starts — so customer / inventory / sales data will not persist.
+This is the cleanest path: keep Vercel for hosting, Turso for the database.
 
-The app auto-detects Vercel and writes to `/tmp/satorial.db` so it
-doesn't crash. If you've already deployed and seen the error page:
+1. **Sign up & create a database** ([turso.tech](https://turso.tech) — free tier is generous):
+   ```bash
+   curl -sSfL https://get.tur.so/install.sh | bash
+   turso auth login
+   turso db create satorial
+   turso db show satorial --url     # copy this — it's libsql://...
+   turso db tokens create satorial  # copy this — it's eyJ...
+   ```
 
-1. Vercel → Project → Settings → Environment Variables → add
-   `SATORIAL_DB_PATH` = `/tmp/satorial.db` as a safety net.
-2. Add `ANTHROPIC_API_KEY` if you want live AI.
-3. Redeploy.
+2. **Set Vercel env vars** (Project → Settings → Environment Variables):
+   - `TURSO_DATABASE_URL` = `libsql://satorial-yourname.turso.io`
+   - `TURSO_AUTH_TOKEN` = the long token from the previous step
+   - `ANTHROPIC_API_KEY` = your Anthropic key (optional but recommended)
 
-### Vercel + Turso (recommended for production on Vercel)
+3. **Redeploy.** On the first request the schema migrates and the seed data loads. After that, your data persists across cold starts, regions, and redeploys.
 
-[Turso](https://turso.tech) gives you a free hosted libsql/SQLite database
-that survives serverless cold starts. To migrate (planned, not yet
-shipped — open an issue if you want it prioritized):
+### Vercel without Turso (preview / demo only)
 
-1. `turso db create satorial`
-2. Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in Vercel env.
-3. Swap `lib/db.ts` to use `@libsql/client` (~30 min change).
+The app auto-detects Vercel and falls back to `/tmp/satorial.db`. Data **will not persist** — `/tmp` is wiped between cold starts. Fine for kicking the tires; not for real customer data.
 
-### Railway / Render / Fly.io (recommended)
+### Local development
 
-These platforms support persistent volumes and long-running Node
-processes, which is what `better-sqlite3` was designed for.
+```bash
+npm install
+cp .env.example .env.local   # add ANTHROPIC_API_KEY if you want
+npm run dev
+```
 
-**Railway** example:
-1. New project → Deploy from GitHub.
-2. Add a volume mounted at `/data`.
-3. Set env: `SATORIAL_DB_PATH=/data/satorial.db`.
-4. Add `ANTHROPIC_API_KEY` and any integration creds.
-5. Deploy. Data persists across restarts.
+The DB file is created at `./data/satorial.db` on first run.
+
+### Railway / Render / Fly.io
+
+If you'd rather host the SQLite file yourself on a persistent volume:
+
+1. Mount a volume at `/data`.
+2. Set `SATORIAL_DB_PATH=/data/satorial.db`.
+3. Deploy. Data persists across restarts.
 
 ## Notes
 

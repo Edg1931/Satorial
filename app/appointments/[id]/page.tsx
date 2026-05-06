@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { one } from "@/lib/db";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import { dollars, relativeDate, shortDate, shortDateTime, daysFromNow } from "@/lib/format";
 import type { Appointment, GroupOrder } from "@/lib/types";
@@ -11,11 +11,10 @@ export const dynamic = "force-dynamic";
 
 const STAGES_FLOW = ["scheduled", "measured", "cut", "first_fitting", "second_fitting", "ready", "delivered"];
 
-export default function AppointmentDetail({ params }: { params: { id: string } }) {
-  const conn = db();
-  const a = conn.prepare("SELECT * FROM appointments WHERE id = ?").get(params.id) as Appointment | undefined;
+export default async function AppointmentDetail({ params }: { params: { id: string } }) {
+  const a = await one<Appointment>("SELECT * FROM appointments WHERE id = ?", [params.id]);
   if (!a) notFound();
-  const group = a.group_order_id ? conn.prepare("SELECT * FROM group_orders WHERE id = ?").get(a.group_order_id) as GroupOrder | undefined : undefined;
+  const group = a.group_order_id ? await one<GroupOrder>("SELECT * FROM group_orders WHERE id = ?", [a.group_order_id]) : undefined;
 
   const stageIdx = STAGES_FLOW.indexOf(a.stage);
 

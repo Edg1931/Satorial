@@ -1,18 +1,17 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { Card, Empty, PageHeader, Stat } from "@/components/ui";
 import { dollars } from "@/lib/format";
 import type { CorporateAccount } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default function CorporatePage() {
-  const conn = db();
-  const accounts = conn.prepare("SELECT * FROM corporate_accounts ORDER BY name").all() as CorporateAccount[];
-  const totals = accounts.map((a) => {
-    const emp = (conn.prepare("SELECT COUNT(*) AS c, COALESCE(SUM(stipend_balance_cents),0) AS bal FROM corporate_employees WHERE account_id = ?").get(a.id) as { c: number; bal: number });
-    return { ...a, employees: emp.c, balance: emp.bal };
-  });
+export default async function CorporatePage() {
+  const accounts = await many<CorporateAccount>("SELECT * FROM corporate_accounts ORDER BY name");
+  const totals = await Promise.all(accounts.map(async (a) => {
+    const emp = (await one<{ c: number; bal: number }>("SELECT COUNT(*) AS c, COALESCE(SUM(stipend_balance_cents),0) AS bal FROM corporate_employees WHERE account_id = ?", [a.id]))!;
+    return { ...a, employees: Number(emp.c), balance: Number(emp.bal) };
+  }));
   const totalEmployees = totals.reduce((a, b) => a + b.employees, 0);
   const totalBalance = totals.reduce((a, b) => a + b.balance, 0);
 

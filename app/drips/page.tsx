@@ -1,22 +1,22 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import { shortDate } from "@/lib/format";
 import RunQueue from "./run-queue";
-import type { DripFlow, DripFlowStep, DripEnrollment } from "@/lib/types";
+import type { DripFlow, DripFlowStep } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default function DripsPage() {
-  const conn = db();
-  const flows = conn.prepare("SELECT * FROM drip_flows ORDER BY name").all() as DripFlow[];
+export default async function DripsPage() {
+  const flows = await many<DripFlow>("SELECT * FROM drip_flows ORDER BY name");
+  const allSteps = await many<DripFlowStep>("SELECT * FROM drip_flow_steps ORDER BY flow_id, sequence");
   const stepsByFlow = new Map<number, DripFlowStep[]>();
-  for (const s of conn.prepare("SELECT * FROM drip_flow_steps ORDER BY flow_id, sequence").all() as DripFlowStep[]) {
+  for (const s of allSteps) {
     if (!stepsByFlow.has(s.flow_id)) stepsByFlow.set(s.flow_id, []);
     stepsByFlow.get(s.flow_id)!.push(s);
   }
-  const active = conn.prepare("SELECT COUNT(*) AS c FROM drip_enrollments WHERE status='active'").get() as { c: number };
-  const dueNow = conn.prepare("SELECT COUNT(*) AS c FROM drip_enrollments WHERE status='active' AND next_run_at <= datetime('now')").get() as { c: number };
+  const activeC = Number((await one<{ c: number }>("SELECT COUNT(*) AS c FROM drip_enrollments WHERE status='active'"))!.c);
+  const dueC = Number((await one<{ c: number }>("SELECT COUNT(*) AS c FROM drip_enrollments WHERE status='active' AND next_run_at <= datetime('now')"))!.c);
 
   return (
     <>
@@ -24,13 +24,13 @@ export default function DripsPage() {
         eyebrow="Marketing"
         title="Automated drip flows"
         subtitle="Sequenced touches triggered by lifecycle events — welcome, post-purchase fit, care guide, win-back, review request."
-        actions={<RunQueue dueNow={dueNow.c} />}
+        actions={<RunQueue dueNow={dueC} />}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
         <Stat label="Active flows" value={flows.filter((f) => f.active).length} />
-        <Stat label="Customers enrolled" value={active.c} />
-        <Stat label="Due to send" value={dueNow.c} tone={dueNow.c > 0 ? "warn" : "good"} />
+        <Stat label="Customers enrolled" value={activeC} />
+        <Stat label="Due to send" value={dueC} tone={dueC > 0 ? "warn" : "good"} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6">

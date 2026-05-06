@@ -1,28 +1,25 @@
 import Link from "next/link";
-import { db } from "@/lib/db";
+import { many } from "@/lib/db";
 import { Card, Empty, PageHeader } from "@/components/ui";
 import { dollars, shortDate } from "@/lib/format";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default function CustomersPage({ searchParams }: { searchParams: { q?: string } }) {
-  const conn = db();
+export default async function CustomersPage({ searchParams }: { searchParams: { q?: string } }) {
   const q = searchParams.q?.trim();
-  const customers = conn.prepare(
-    q
-      ? `SELECT * FROM customers WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? ORDER BY name`
-      : `SELECT * FROM customers ORDER BY name`
-  ).all(...(q ? [`%${q}%`, `%${q}%`, `%${q}%`] : [])) as Customer[];
-
-  const stats = conn.prepare(`
+  const customers = await many<Customer>(
+    q ? `SELECT * FROM customers WHERE name LIKE ? OR email LIKE ? OR phone LIKE ? ORDER BY name`
+      : `SELECT * FROM customers ORDER BY name`,
+    q ? [`%${q}%`, `%${q}%`, `%${q}%`] : []
+  );
+  const stats = await many<{ id: number; appts: number; meas: number; spend: number }>(`
     SELECT c.id,
       (SELECT COUNT(*) FROM appointments WHERE customer_id=c.id) AS appts,
       (SELECT COUNT(*) FROM measurements WHERE customer_id=c.id) AS meas,
       (SELECT COALESCE(SUM(s.total_cents),0) FROM sales s WHERE s.customer_id=c.id) AS spend
-    FROM customers c
-  `).all() as Array<{ id: number; appts: number; meas: number; spend: number }>;
-  const map = new Map(stats.map((s) => [s.id, s]));
+    FROM customers c`);
+  const map = new Map(stats.map((s) => [s.id, { ...s, appts: Number(s.appts), meas: Number(s.meas), spend: Number(s.spend) }]));
 
   return (
     <>

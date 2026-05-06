@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import { dollars, shortDate } from "@/lib/format";
 import { Card, Chip, PageHeader } from "@/components/ui";
 import { code128SVG } from "@/lib/barcode";
@@ -9,17 +9,16 @@ import EditItemForm from "./edit-form";
 
 export const dynamic = "force-dynamic";
 
-export default function ItemDetail({ params }: { params: { id: string } }) {
-  const conn = db();
-  const item = conn.prepare("SELECT * FROM items WHERE id = ?").get(params.id) as Item | undefined;
+export default async function ItemDetail({ params }: { params: { id: string } }) {
+  const item = await one<Item>("SELECT * FROM items WHERE id = ?", [params.id]);
   if (!item) notFound();
-  const sales = conn.prepare(`
+  const sales = await many<{ id: number; sold_at: string; quantity: number; unit_price_cents: number; customer_name: string | null }>(`
     SELECT s.id, s.sold_at, si.quantity, si.unit_price_cents, s.customer_name
     FROM sale_items si JOIN sales s ON s.id = si.sale_id
     WHERE si.item_id = ? ORDER BY s.sold_at DESC LIMIT 12
-  `).all(item.id) as Array<{ id: number; sold_at: string; quantity: number; unit_price_cents: number; customer_name: string | null }>;
+  `, [item.id]);
 
-  const totalSold = (conn.prepare(`SELECT COALESCE(SUM(quantity),0) as q FROM sale_items WHERE item_id = ?`).get(item.id) as { q: number }).q;
+  const totalSold = Number((await one<{ q: number }>(`SELECT COALESCE(SUM(quantity),0) as q FROM sale_items WHERE item_id = ?`, [item.id]))!.q);
 
   const svg = code128SVG(item.barcode, { height: 70, width: 2 });
 

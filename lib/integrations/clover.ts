@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { exec, one } from "../db";
 import type { Integration } from "../types";
 
 export type CloverConfig = {
@@ -7,17 +7,17 @@ export type CloverConfig = {
   baseUrl?: string;
 };
 
-export function getConfig(provider: "clover" | "twilio" | "resend"): any | null {
-  const row = db().prepare("SELECT * FROM integrations WHERE provider = ?").get(provider) as Integration | undefined;
+export async function getConfig(provider: "clover" | "twilio" | "resend"): Promise<any | null> {
+  const row = await one<Integration>("SELECT * FROM integrations WHERE provider = ?", [provider]);
   if (!row?.config) return null;
   try { return JSON.parse(row.config); } catch { return null; }
 }
 
-export function setConfig(provider: "clover" | "twilio" | "resend", config: any, status: "connected" | "disconnected" | "error" = "connected") {
-  db().prepare(`
+export async function setConfig(provider: "clover" | "twilio" | "resend", config: any, status: "connected" | "disconnected" | "error" = "connected"): Promise<void> {
+  await exec(`
     INSERT INTO integrations (provider, status, config) VALUES (?, ?, ?)
     ON CONFLICT(provider) DO UPDATE SET status = excluded.status, config = excluded.config
-  `).run(provider, status, JSON.stringify(config));
+  `, [provider, status, JSON.stringify(config)]);
 }
 
 function cloverBase(c: CloverConfig) {
@@ -41,17 +41,6 @@ export async function cloverPullInventory(c: CloverConfig): Promise<{ created: n
   const res = { created: 0, updated: 0, errors: [] as string[] };
   let offset = 0;
   const limit = 100;
-  const conn = db();
-  const upsert = conn.prepare(`
-    INSERT INTO items (sku, barcode, name, category, color, size, cost_cents, price_cents, quantity, reorder_point, supplier, location, is_rental)
-    VALUES (@sku, @barcode, @name, @category, @color, @size, @cost_cents, @price_cents, @quantity, @reorder_point, @supplier, @location, 0)
-    ON CONFLICT(sku) DO UPDATE SET
-      name = excluded.name,
-      price_cents = excluded.price_cents,
-      cost_cents = COALESCE(excluded.cost_cents, items.cost_cents),
-      quantity = excluded.quantity,
-      updated_at = datetime('now')
-  `);
   while (true) {
     try {
       const r = await fetch(`${cloverBase(c)}/v3/merchants/${c.merchantId}/items?limit=${limit}&offset=${offset}&expand=itemStock,categories`, {
@@ -62,30 +51,26 @@ export async function cloverPullInventory(c: CloverConfig): Promise<{ created: n
       const elements = j.elements || [];
       for (const it of elements) {
         const sku = it.sku || it.code || it.id;
-        const exists = conn.prepare("SELECT id FROM items WHERE sku = ?").get(sku);
+        const exists = await one("SELECT id FROM items WHERE sku = ?", [sku]);
         const category = (it.categories?.elements?.[0]?.name) || "Uncategorized";
-        upsert.run({
-          sku,
-          barcode: it.code || sku,
-          name: it.name,
-          category,
-          color: null,
-          size: null,
-          cost_cents: Math.round((it.cost || 0) * 1) || 0,
-          price_cents: Math.round((it.price || 0) * 1) || 0,
-          quantity: Math.round(it.itemStock?.quantity || 0),
-          reorder_point: 0,
-          supplier: null,
-          location: null,
-        });
+        await exec(`
+          INSERT INTO items (sku, barcode, name, category, color, size, cost_cents, price_cents, quantity, reorder_point, supplier, location, is_rental)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+          ON CONFLICT(sku) DO UPDATE SET
+            name = excluded.name,
+            price_cents = excluded.price_cents,
+            cost_cents = COALESCE(excluded.cost_cents, items.cost_cents),
+            quantity = excluded.quantity,
+            updated_at = datetime('now')
+        `, [sku, it.code || sku, it.name, category, null, null, Math.round(it.cost || 0), Math.round(it.price || 0), Math.round(it.itemStock?.quantity || 0), 0, null, null]);
         if (exists) res.updated++; else res.created++;
       }
       if (elements.length < limit) break;
       offset += limit;
     } catch (e: any) { res.errors.push(e?.message || String(e)); break; }
   }
-  conn.prepare("UPDATE integrations SET last_sync_at = datetime('now'), last_sync_summary = ? WHERE provider = 'clover'")
-    .run(`Pulled: ${res.created} new, ${res.updated} updated, ${res.errors.length} errors`);
+  await exec("UPDATE integrations SET last_sync_at = datetime('now'), last_sync_summary = ? WHERE provider = 'clover'",
+    [`Pulled: ${res.created} new, ${res.updated} updated, ${res.errors.length} errors`]);
   return res;
 }
 

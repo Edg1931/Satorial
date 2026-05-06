@@ -1,17 +1,16 @@
 import { notFound } from "next/navigation";
-import { db } from "@/lib/db";
+import { many, one } from "@/lib/db";
 import type { GroupOrder, Appointment } from "@/lib/types";
 import WeddingPortalForm from "./form";
 
 export const dynamic = "force-dynamic";
 
-export default function WeddingPortal({ params }: { params: { token: string } }) {
-  const conn = db();
-  const portal = conn.prepare("SELECT group_order_id FROM wedding_portals WHERE token = ?").get(params.token) as { group_order_id: number } | undefined;
+export default async function WeddingPortal({ params }: { params: { token: string } }) {
+  const portal = await one<{ group_order_id: number }>("SELECT group_order_id FROM wedding_portals WHERE token = ?", [params.token]);
   if (!portal) notFound();
-  const group = conn.prepare("SELECT * FROM group_orders WHERE id = ?").get(portal.group_order_id) as GroupOrder | undefined;
+  const group = await one<GroupOrder>("SELECT * FROM group_orders WHERE id = ?", [portal.group_order_id]);
   if (!group) notFound();
-  const members = conn.prepare("SELECT * FROM appointments WHERE group_order_id = ? ORDER BY customer_name").all(group.id) as Appointment[];
+  const members = await many<Appointment>("SELECT * FROM appointments WHERE group_order_id = ? ORDER BY customer_name", [group.id]);
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
