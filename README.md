@@ -71,6 +71,51 @@ ai_messages                    — chat history
 ai_actions                     — log of AI-proposed actions executed
 ```
 
+## Deployment
+
+### TL;DR
+
+| Host | Persistent data | Setup difficulty | Recommendation |
+|------|-----------------|------------------|----------------|
+| **Railway / Render / Fly.io** | ✅ persistent disk for SQLite | Easy | **Best for this app** |
+| **Vercel** + Turso/libsql | ✅ remote SQLite | Medium | Good for production on Vercel |
+| **Vercel** (file-based) | ⚠️ data wiped between cold starts | Easiest | Only for demo / preview |
+
+### Vercel (preview / demo only)
+
+Vercel's filesystem is read-only outside `/tmp`, and `/tmp` is wiped between
+cold starts — so customer / inventory / sales data will not persist.
+
+The app auto-detects Vercel and writes to `/tmp/satorial.db` so it
+doesn't crash. If you've already deployed and seen the error page:
+
+1. Vercel → Project → Settings → Environment Variables → add
+   `SATORIAL_DB_PATH` = `/tmp/satorial.db` as a safety net.
+2. Add `ANTHROPIC_API_KEY` if you want live AI.
+3. Redeploy.
+
+### Vercel + Turso (recommended for production on Vercel)
+
+[Turso](https://turso.tech) gives you a free hosted libsql/SQLite database
+that survives serverless cold starts. To migrate (planned, not yet
+shipped — open an issue if you want it prioritized):
+
+1. `turso db create satorial`
+2. Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in Vercel env.
+3. Swap `lib/db.ts` to use `@libsql/client` (~30 min change).
+
+### Railway / Render / Fly.io (recommended)
+
+These platforms support persistent volumes and long-running Node
+processes, which is what `better-sqlite3` was designed for.
+
+**Railway** example:
+1. New project → Deploy from GitHub.
+2. Add a volume mounted at `/data`.
+3. Set env: `SATORIAL_DB_PATH=/data/satorial.db`.
+4. Add `ANTHROPIC_API_KEY` and any integration creds.
+5. Deploy. Data persists across restarts.
+
 ## Notes
 
 - Pages are dynamic (server-rendered) so dashboard numbers always reflect the live DB.

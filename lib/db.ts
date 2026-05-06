@@ -4,12 +4,41 @@ import path from "node:path";
 
 let _db: Database.Database | null = null;
 
+function defaultDbPath(): string {
+  if (process.env.SATORIAL_DB_PATH) return process.env.SATORIAL_DB_PATH;
+  // Serverless platforms (Vercel, AWS Lambda, Netlify) only allow writes to /tmp.
+  // Note: /tmp is ephemeral — data is lost between cold starts. For persistent
+  // storage on these platforms, use Turso/libsql or deploy to a host with a
+  // persistent disk (Railway, Render, Fly.io). See README for details.
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NETLIFY) {
+    return "/tmp/satorial.db";
+  }
+  return path.join(process.cwd(), "data", "satorial.db");
+}
+
 export function db(): Database.Database {
   if (_db) return _db;
-  const dbPath = process.env.SATORIAL_DB_PATH || path.join(process.cwd(), "data", "satorial.db");
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const conn = new Database(dbPath);
-  conn.pragma("journal_mode = WAL");
+  const dbPath = defaultDbPath();
+  try {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  } catch (e: any) {
+    if (e?.code !== "EEXIST") {
+      console.error(`[satorial:db] failed to create directory for ${dbPath}:`, e?.message || e);
+      throw new Error(`Cannot create database directory at ${path.dirname(dbPath)}. On Vercel/serverless, set SATORIAL_DB_PATH=/tmp/satorial.db or use a hosted database. Original error: ${e?.message || e}`);
+    }
+  }
+  let conn: Database.Database;
+  try {
+    conn = new Database(dbPath);
+  } catch (e: any) {
+    console.error(`[satorial:db] failed to open ${dbPath}:`, e?.message || e);
+    throw new Error(`Cannot open database at ${dbPath}. On read-only filesystems (e.g. Vercel), set SATORIAL_DB_PATH=/tmp/satorial.db. Original error: ${e?.message || e}`);
+  }
+  try {
+    conn.pragma("journal_mode = WAL");
+  } catch {
+    // WAL may fail on some filesystems; fall back to default journal.
+  }
   conn.pragma("foreign_keys = ON");
   migrate(conn);
   seedIfEmpty(conn);
