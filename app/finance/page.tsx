@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { Card, PageHeader, Stat } from "@/components/ui";
 import { dollars, shortDate } from "@/lib/format";
 import FinanceCharts from "./charts";
+import CashFlowChart from "./cashflow";
 
 export const dynamic = "force-dynamic";
 
@@ -73,12 +74,46 @@ function loadFinance() {
   const recentExpenses = conn.prepare(`SELECT * FROM expenses ORDER BY occurred_at DESC LIMIT 8`).all() as Array<{ id: number; occurred_at: string; category: string; amount_cents: number; vendor: string | null }>;
   const openPOs = conn.prepare(`SELECT * FROM purchase_orders WHERE status IN ('open','partial') ORDER BY ordered_at DESC LIMIT 8`).all() as Array<{ id: number; supplier: string; ordered_at: string; expected_at: string | null; total_cents: number; status: string }>;
 
+  const inflowAppt = conn.prepare(`
+    SELECT date(COALESCE(event_date, appointment_date)) AS d, SUM(balance_cents) AS amt
+    FROM appointments
+    WHERE status = 'open' AND balance_cents > 0
+      AND date(COALESCE(event_date, appointment_date)) BETWEEN date('now') AND date('now','+90 days')
+    GROUP BY d ORDER BY d
+  `).all() as Array<{ d: string; amt: number }>;
+
+  const outflowPO = conn.prepare(`
+    SELECT date(COALESCE(expected_at, ordered_at)) AS d, SUM(total_cents) AS amt
+    FROM purchase_orders
+    WHERE status IN ('open','partial')
+      AND date(COALESCE(expected_at, ordered_at)) BETWEEN date('now') AND date('now','+90 days')
+    GROUP BY d ORDER BY d
+  `).all() as Array<{ d: string; amt: number }>;
+
+  const dailyExpenseAvg = (conn.prepare(`SELECT COALESCE(SUM(amount_cents),0)/90.0 AS avg FROM expenses WHERE occurred_at >= datetime('now','-90 days')`).get() as { avg: number }).avg;
+  const cashflow = buildCashflow(inflowAppt, outflowPO, dailyExpenseAvg);
+
   const gp30 = rev.r30 - cogs.c30;
   const op30 = gp30 - expenses.e30;
   const margin30 = rev.r30 > 0 ? gp30 / rev.r30 : 0;
   const trend = rev.rPrev30 > 0 ? ((rev.r30 - rev.rPrev30) / rev.rPrev30) * 100 : null;
 
-  return { rev, cogs, expenses, expenseCats, inventory, purchaseOrders, deferred, dailyRev, upcomingDeposits, recentExpenses, openPOs, gp30, op30, margin30, trend };
+  return { rev, cogs, expenses, expenseCats, inventory, purchaseOrders, deferred, dailyRev, upcomingDeposits, recentExpenses, openPOs, cashflow, gp30, op30, margin30, trend };
+}
+
+function buildCashflow(inflows: Array<{ d: string; amt: number }>, outflows: Array<{ d: string; amt: number }>, dailyExpense: number) {
+  const inMap = new Map(inflows.map((x) => [x.d, x.amt]));
+  const outMap = new Map(outflows.map((x) => [x.d, x.amt]));
+  const days: Array<{ d: string; in_: number; out: number; net: number }> = [];
+  for (let i = 0; i <= 90; i++) {
+    const dt = new Date();
+    dt.setDate(dt.getDate() + i);
+    const d = dt.toISOString().slice(0, 10);
+    const in_ = inMap.get(d) || 0;
+    const out = (outMap.get(d) || 0) + dailyExpense;
+    days.push({ d, in_, out, net: in_ - out });
+  }
+  return days;
 }
 
 export default function FinancePage() {
@@ -115,6 +150,11 @@ export default function FinancePage() {
       </div>
 
       <FinanceCharts daily={f.dailyRev} categories={f.expenseCats} />
+
+      <Card title="90-day cash flow forecast" className="mt-6">
+        <div className="text-xs text-[var(--ink-mute)] mb-3">Inflows = balances due on booked appointments by event date. Outflows = expected POs + 90-day average expenses.</div>
+        <CashFlowChart data={f.cashflow} />
+      </Card>
 
       <div className="grid lg:grid-cols-2 gap-6 mt-6">
         <Card title="Balances to collect">

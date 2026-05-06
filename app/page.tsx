@@ -50,6 +50,16 @@ function dashboardData() {
     ORDER BY event_date ASC
   `).all() as Array<{ id: number; customer_name: string; event_date: string; stage: string }>;
 
+  const lateRentals = conn.prepare(`
+    SELECT id, customer_name, rental_return_date
+    FROM appointments
+    WHERE type='rental' AND status='open'
+      AND rental_return_date IS NOT NULL
+      AND date(rental_return_date) < date('now')
+      AND rental_state IN ('out','late')
+    ORDER BY rental_return_date ASC
+  `).all() as Array<{ id: number; customer_name: string; rental_return_date: string }>;
+
   const topSizes = conn.prepare(`
     SELECT category_at_sale AS category, COALESCE(size_at_sale,'—') AS size, SUM(quantity) AS units
     FROM sale_items si JOIN sales s ON s.id=si.sale_id
@@ -61,7 +71,7 @@ function dashboardData() {
   const margin = last30.rev > 0 ? (last30.rev - cogs.cogs) / last30.rev : 0;
   const trend = prev30.rev > 0 ? ((last30.rev - prev30.rev) / prev30.rev) * 100 : null;
 
-  return { totals, last30, cogs, margin, trend, lowStock, upcoming, dueSoon, topSizes };
+  return { totals, last30, cogs, margin, trend, lowStock, upcoming, dueSoon, lateRentals, topSizes };
 }
 
 export default function DashboardPage() {
@@ -85,10 +95,10 @@ export default function DashboardPage() {
         <Stat label="Gross Margin · 30d" value={`${(d.margin * 100).toFixed(1)}%`} hint={`COGS ${dollars(d.cogs.cogs)}`} />
         <Stat label="Inventory Value" value={dollars(d.totals.inv_value)} hint={`${d.totals.units} units · ${d.totals.skus} SKUs`} />
         <Stat
-          label="At-Risk Orders"
-          value={d.dueSoon.length}
-          hint={d.dueSoon.length ? "events in next 14d, not ready" : "all clear"}
-          tone={d.dueSoon.length > 0 ? "warn" : "good"}
+          label="At-Risk / Late"
+          value={d.dueSoon.length + d.lateRentals.length}
+          hint={d.lateRentals.length ? `${d.lateRentals.length} rental(s) past due` : d.dueSoon.length ? "events in next 14d, not ready" : "all clear"}
+          tone={d.dueSoon.length > 0 || d.lateRentals.length > 0 ? "warn" : "good"}
         />
       </div>
 
@@ -150,13 +160,22 @@ export default function DashboardPage() {
           )}
         </Card>
 
-        <Card title="Garments Due Soon">
-          {d.dueSoon.length === 0 ? (
-            <div className="text-sm text-[var(--ink-mute)]">No tight deadlines.</div>
+        <Card title="Action queue">
+          {d.dueSoon.length === 0 && d.lateRentals.length === 0 ? (
+            <div className="text-sm text-[var(--ink-mute)]">All clear.</div>
           ) : (
             <div className="space-y-2">
+              {d.lateRentals.map((a) => (
+                <Link key={`r-${a.id}`} href={`/appointments/${a.id}`} className="block px-3 py-2 rounded-lg border border-[var(--bad)]/40 hover:border-[var(--bad)]">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm">{a.customer_name}</div>
+                    <Chip tone="bad">Late rental</Chip>
+                  </div>
+                  <div className="text-[11px] text-[var(--ink-mute)]">Return was {relativeDate(a.rental_return_date)}</div>
+                </Link>
+              ))}
               {d.dueSoon.map((a) => (
-                <Link key={a.id} href={`/appointments/${a.id}`} className="block px-3 py-2 rounded-lg border border-[var(--line-soft)] hover:border-[var(--line)]">
+                <Link key={`d-${a.id}`} href={`/appointments/${a.id}`} className="block px-3 py-2 rounded-lg border border-[var(--line-soft)] hover:border-[var(--line)]">
                   <div className="text-sm">{a.customer_name}</div>
                   <div className="text-[11px] text-[var(--ink-mute)]">Event {relativeDate(a.event_date)} · stage {a.stage.replace("_", " ")}</div>
                 </Link>

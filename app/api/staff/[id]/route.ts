@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const body = await req.json();
-  const allowed = ["name", "email", "phone", "role", "pin", "active"];
+  const allowed = ["name", "email", "phone", "role", "pin", "active", "commission_percent"];
   const sets: string[] = [];
   const values: any[] = [];
   for (const k of allowed) if (k in body) { sets.push(`${k} = ?`); values.push(body[k]); }

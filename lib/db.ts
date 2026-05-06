@@ -283,7 +283,134 @@ function migrate(conn: Database.Database) {
       result TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS wedding_portals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_order_id INTEGER NOT NULL REFERENCES group_orders(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS wishlist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+      style_id INTEGER REFERENCES styles(id) ON DELETE SET NULL,
+      label TEXT,
+      notify_email INTEGER NOT NULL DEFAULT 1,
+      notify_sms INTEGER NOT NULL DEFAULT 0,
+      notified_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_wishlist_customer ON wishlist(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_wishlist_item ON wishlist(item_id);
+
+    CREATE TABLE IF NOT EXISTS referrals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      referrer_customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      referee_customer_id INTEGER REFERENCES customers(id),
+      referee_sale_id INTEGER REFERENCES sales(id),
+      reward_credit_cents INTEGER NOT NULL DEFAULT 5000,
+      status TEXT NOT NULL DEFAULT 'pending',
+      redeemed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_referrals_code ON referrals(code);
+
+    CREATE TABLE IF NOT EXISTS commissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+      staff_id INTEGER NOT NULL REFERENCES staff(id),
+      percent REAL NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      paid_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_commissions_staff ON commissions(staff_id);
+
+    CREATE TABLE IF NOT EXISTS corporate_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      contact_name TEXT,
+      contact_email TEXT,
+      contact_phone TEXT,
+      billing_email TEXT,
+      stipend_cents INTEGER NOT NULL DEFAULT 0,
+      stipend_period TEXT NOT NULL DEFAULT 'annual',
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS corporate_employees (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL REFERENCES corporate_accounts(id) ON DELETE CASCADE,
+      customer_id INTEGER REFERENCES customers(id),
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      role TEXT,
+      stipend_balance_cents INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_corp_emp_account ON corporate_employees(account_id);
+
+    CREATE TABLE IF NOT EXISTS drip_flows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      trigger TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS drip_flow_steps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      flow_id INTEGER NOT NULL REFERENCES drip_flows(id) ON DELETE CASCADE,
+      sequence INTEGER NOT NULL,
+      delay_days INTEGER NOT NULL DEFAULT 0,
+      channel TEXT NOT NULL,
+      subject TEXT,
+      body TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS drip_enrollments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      flow_id INTEGER NOT NULL REFERENCES drip_flows(id) ON DELETE CASCADE,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      enrolled_at TEXT NOT NULL DEFAULT (datetime('now')),
+      next_step INTEGER NOT NULL DEFAULT 1,
+      next_run_at TEXT,
+      status TEXT NOT NULL DEFAULT 'active'
+    );
+    CREATE INDEX IF NOT EXISTS idx_drip_next ON drip_enrollments(next_run_at, status);
+
+    CREATE TABLE IF NOT EXISTS lookbook (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER REFERENCES items(id),
+      style_id INTEGER REFERENCES styles(id),
+      title TEXT NOT NULL,
+      caption TEXT NOT NULL,
+      hashtags TEXT,
+      image_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
+
+  ensureColumn(conn, "appointments", "rental_state", "TEXT NOT NULL DEFAULT 'reserved'");
+  ensureColumn(conn, "sales", "staff_id", "INTEGER");
+  ensureColumn(conn, "sales", "referral_code", "TEXT");
+  ensureColumn(conn, "sales", "credit_applied_cents", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(conn, "customers", "referral_code_owned", "TEXT");
+  ensureColumn(conn, "customers", "loyalty_credits_cents", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(conn, "staff", "commission_percent", "REAL NOT NULL DEFAULT 0");
+}
+
+function ensureColumn(conn: Database.Database, table: string, column: string, definition: string) {
+  const cols = conn.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === column)) {
+    conn.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 function seedIfEmpty(conn: Database.Database) {
@@ -312,6 +439,57 @@ function seedIfEmpty(conn: Database.Database) {
     const ins = conn.prepare("INSERT INTO integrations (provider, status) VALUES (?, 'disconnected')");
     for (const p of ["clover", "twilio", "resend"]) ins.run(p);
   }
+
+  const flowCount = (conn.prepare("SELECT COUNT(*) as c FROM drip_flows").get() as { c: number }).c;
+  if (flowCount === 0) seedDripFlows(conn);
+}
+
+function seedDripFlows(conn: Database.Database) {
+  const flows: Array<{ name: string; description: string; trigger: string; steps: Array<{ delay_days: number; channel: string; subject: string; body: string }> }> = [
+    {
+      name: "Welcome series", description: "Three touches over 14 days for every new customer.", trigger: "new_customer",
+      steps: [
+        { delay_days: 0, channel: "email", subject: "Welcome to Satorial, {{first_name}}", body: "Hi {{first_name}},\n\nThanks for stopping in. A few things you should know about us — and a small token for joining the book.\n\n— The Satorial team" },
+        { delay_days: 7, channel: "email", subject: "What we wish every man knew about fit", body: "Hi {{first_name}},\n\nA quick read on shoulder, jacket length, and trouser break — the three things that separate a good suit from a great one.\n\n— Satorial" },
+        { delay_days: 14, channel: "email", subject: "Have a moment for a fitting?", body: "Hi {{first_name}},\n\nWhenever you're ready for a measure-up, our calendar is open. Reply with two times that work.\n\n— Satorial" },
+      ],
+    },
+    {
+      name: "Post-purchase fit follow-up", description: "Day 7 check-in after a sale.", trigger: "post_purchase",
+      steps: [
+        { delay_days: 7, channel: "email", subject: "How's it wearing, {{first_name}}?", body: "Hi {{first_name}},\n\nHope you've had a chance to wear what you picked up. If anything needs adjusting, drop in this week — first round is on us.\n\n— Satorial" },
+      ],
+    },
+    {
+      name: "Care guide", description: "Day 30 garment-care primer.", trigger: "post_purchase",
+      steps: [
+        { delay_days: 30, channel: "email", subject: "Make it last: a 90-second guide", body: "Hi {{first_name}},\n\nSteam not iron. Cedar hangers. 24 hours rest between wears. The little habits that double a wardrobe's life.\n\n— Satorial" },
+      ],
+    },
+    {
+      name: "Win-back", description: "Re-engage customers after 180 days of silence.", trigger: "lapsed_180",
+      steps: [
+        { delay_days: 0, channel: "email", subject: "It's been a minute, {{first_name}}", body: "Hi {{first_name}},\n\nWe've added some fabrics worth seeing. If you'd like, we'll set aside time and a glass of something — your call.\n\n— Satorial" },
+      ],
+    },
+    {
+      name: "Review request", description: "Day 14 ask for a Google review after purchase.", trigger: "post_purchase",
+      steps: [
+        { delay_days: 14, channel: "email", subject: "A quick favor", body: "Hi {{first_name}},\n\nIf the experience was a good one, a short Google review would mean a great deal to a small shop. Link below — three sentences is plenty.\n\n— Satorial" },
+      ],
+    },
+  ];
+
+  const insFlow = conn.prepare("INSERT INTO drip_flows (name, description, trigger) VALUES (?, ?, ?)");
+  const insStep = conn.prepare("INSERT INTO drip_flow_steps (flow_id, sequence, delay_days, channel, subject, body) VALUES (?, ?, ?, ?, ?, ?)");
+  const tx = conn.transaction(() => {
+    for (const f of flows) {
+      const r = insFlow.run(f.name, f.description, f.trigger);
+      const id = Number(r.lastInsertRowid);
+      f.steps.forEach((s, i) => insStep.run(id, i + 1, s.delay_days, s.channel, s.subject, s.body));
+    }
+  });
+  tx();
 }
 
 function seedInventory(conn: Database.Database) {

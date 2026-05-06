@@ -2,16 +2,25 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const NAV = [
+const NAV: Array<{ href: string; label: string; icon: string; section?: string }> = [
   { href: "/", label: "Dashboard", icon: "◇" },
+  { section: "Floor", href: "", label: "", icon: "" },
   { href: "/inventory", label: "Inventory", icon: "▦" },
   { href: "/scan", label: "Scan", icon: "▤" },
   { href: "/sales", label: "Sales", icon: "◷" },
   { href: "/appointments", label: "Appointments", icon: "▣" },
+  { section: "Book", href: "", label: "", icon: "" },
   { href: "/customers", label: "Customers", icon: "◐" },
+  { href: "/corporate", label: "Corporate", icon: "▥" },
+  { href: "/commissions", label: "Commissions", icon: "◊" },
+  { section: "Money", href: "", label: "", icon: "" },
   { href: "/finance", label: "Finance", icon: "◍" },
+  { section: "Marketing", href: "", label: "", icon: "" },
   { href: "/campaigns", label: "Campaigns", icon: "◈" },
+  { href: "/drips", label: "Drip flows", icon: "◌" },
   { href: "/social", label: "Social", icon: "◑" },
+  { href: "/lookbook", label: "Look Book", icon: "▨" },
+  { section: "AI", href: "", label: "", icon: "" },
   { href: "/ai", label: "AI Partner", icon: "✦" },
   { href: "/settings", label: "Settings", icon: "⚙" },
 ];
@@ -30,13 +39,16 @@ export default function Sidebar() {
         </Link>
       </div>
       <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto scrollbar">
-        {NAV.map((n) => {
+        {NAV.map((n, i) => {
+          if (n.section) {
+            return <div key={`s-${i}`} className="text-[10px] uppercase tracking-[0.18em] text-[var(--ink-mute)] mt-4 mb-1 px-3">{n.section}</div>;
+          }
           const active = n.href === "/" ? pathname === "/" : pathname?.startsWith(n.href);
           return (
             <Link
               key={n.href}
               href={n.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition ${
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition ${
                 active
                   ? "bg-[var(--bg-elev-2)] text-[var(--ink)] border border-[var(--line)]"
                   : "text-[var(--ink-soft)] hover:bg-[var(--bg-elev)] hover:text-[var(--ink)] border border-transparent"

@@ -5,6 +5,9 @@ import { dollars, shortDate, shortDateTime } from "@/lib/format";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import type { Customer, Measurement, Appointment } from "@/lib/types";
 import MeasurementForm from "./measurement-form";
+import WishlistManager from "./wishlist";
+import ReferralCard from "./referral-card";
+import { tierFor } from "@/lib/loyalty";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +27,14 @@ export default function CustomerDetail({ params }: { params: { id: string } }) {
   const measurements = conn.prepare("SELECT * FROM measurements WHERE customer_id = ? ORDER BY taken_at DESC").all(customer.id) as Measurement[];
   const appts = conn.prepare("SELECT * FROM appointments WHERE customer_id = ? ORDER BY appointment_date DESC").all(customer.id) as Appointment[];
   const sales = conn.prepare("SELECT id, sold_at, total_cents FROM sales WHERE customer_id = ? ORDER BY sold_at DESC LIMIT 20").all(customer.id) as Array<{ id: number; sold_at: string; total_cents: number }>;
-  const lifetime = sales.reduce((a, b) => a + b.total_cents, 0);
+  const lifetimeAll = (conn.prepare("SELECT COALESCE(SUM(total_cents),0) AS t FROM sales WHERE customer_id = ?").get(customer.id) as { t: number }).t;
+  const lifetime = lifetimeAll;
+  const tier = tierFor(lifetime);
+  const wishlist = conn.prepare(`
+    SELECT w.*, i.name AS item_name, i.color, i.size, i.quantity FROM wishlist w
+    LEFT JOIN items i ON i.id = w.item_id WHERE w.customer_id = ? ORDER BY w.created_at DESC
+  `).all(customer.id) as Array<any>;
+  const referrals = conn.prepare("SELECT * FROM referrals WHERE referrer_customer_id = ? ORDER BY created_at DESC").all(customer.id) as Array<any>;
 
   return (
     <>
@@ -32,8 +42,24 @@ export default function CustomerDetail({ params }: { params: { id: string } }) {
         eyebrow={`Customer · since ${shortDate(customer.created_at)}`}
         title={customer.name}
         subtitle={[customer.email, customer.phone].filter(Boolean).join(" · ") || "No contact details on file"}
-        actions={<Link href={`/appointments/new?customer_id=${customer.id}`} className="btn btn-primary">+ Appointment</Link>}
+        actions={
+          <>
+            <span className="chip" style={{ borderColor: tier.color, color: tier.color }}>{tier.name}</span>
+            <Link href={`/appointments/new?customer_id=${customer.id}`} className="btn btn-primary">+ Appointment</Link>
+          </>
+        }
       />
+
+      {tier.nextTier && (
+        <div className="card p-3 mb-6 text-sm text-[var(--ink-soft)]">
+          {dollars(tier.nextTier.remaining)} away from <span className="text-[var(--accent-soft)]">{tier.nextTier.name}</span>.
+        </div>
+      )}
+      {(customer.loyalty_credits_cents ?? 0) > 0 && (
+        <div className="card p-3 mb-6 text-sm">
+          <span className="chip chip-good">Store credit</span> <span className="ml-2">{dollars(customer.loyalty_credits_cents ?? 0)} available — apply at checkout.</span>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <Stat label="Lifetime spend" value={dollars(lifetime)} />
@@ -79,6 +105,11 @@ export default function CustomerDetail({ params }: { params: { id: string } }) {
         <Card title="Add measurements">
           <MeasurementForm customerId={customer.id} />
         </Card>
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6 mt-6">
+        <ReferralCard customerId={customer.id} customerName={customer.name} existing={referrals} />
+        <WishlistManager customerId={customer.id} initial={wishlist} />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-6 mt-6">

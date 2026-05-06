@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
-import { dollars, relativeDate, shortDate, shortDateTime } from "@/lib/format";
+import { dollars, relativeDate, shortDate, shortDateTime, daysFromNow } from "@/lib/format";
 import type { Appointment, GroupOrder } from "@/lib/types";
 import StageControl from "./stage-control";
+import RentalControl from "./rental-control";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,12 @@ export default function AppointmentDetail({ params }: { params: { id: string } }
           tone={a.balance_cents > 0 ? "warn" : "good"}
         />
       </div>
+
+      {a.type === "rental" && (
+        <Card title="Rental lifecycle" className="mb-6">
+          <RentalControl id={a.id} state={a.rental_state} returnDate={a.rental_return_date} />
+        </Card>
+      )}
 
       <Card title="Workflow stages" className="mb-6">
         <div className="flex items-center gap-2 overflow-x-auto scrollbar pb-2">

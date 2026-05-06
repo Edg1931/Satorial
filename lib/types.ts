@@ -44,6 +44,8 @@ export type Customer = {
   birthday: string | null;
   preferences: string | null;
   notes: string | null;
+  referral_code_owned: string | null;
+  loyalty_credits_cents: number;
   created_at: string;
 };
 
@@ -86,9 +88,12 @@ export const APPT_STAGES = [
 ] as const;
 export type ApptStage = typeof APPT_STAGES[number];
 
+export const RENTAL_STATES = ["reserved", "out", "late", "returned", "cleaning", "available"] as const;
+export type RentalState = typeof RENTAL_STATES[number];
+
 export type Appointment = {
   id: number;
-  type: "custom_suit" | "rental" | "fitting" | "consultation" | "alteration";
+  type: "custom_suit" | "rental" | "fitting" | "consultation";
   customer_id: number | null;
   group_order_id: number | null;
   customer_name: string;
@@ -110,6 +115,7 @@ export type Appointment = {
   balance_cents: number;
   assigned_to: string | null;
   notes: string | null;
+  rental_state: RentalState;
   created_at: string;
   updated_at: string;
 };
@@ -170,9 +176,117 @@ export type Staff = {
   name: string;
   email: string | null;
   phone: string | null;
-  role: "owner" | "manager" | "sales" | "tailor";
+  role: "owner" | "manager" | "sales" | "stylist";
   pin: string | null;
   active: number;
+  commission_percent: number;
+  created_at: string;
+};
+
+export const LOYALTY_TIERS = [
+  { name: "Member", min_cents: 0, color: "#7c7768" },
+  { name: "Silver", min_cents: 150000, color: "#c0c0c0" },
+  { name: "Gold", min_cents: 500000, color: "#c69f5a" },
+  { name: "Platinum", min_cents: 1500000, color: "#d6b87c" },
+] as const;
+export type LoyaltyTier = typeof LOYALTY_TIERS[number]["name"];
+
+export type Wishlist = {
+  id: number;
+  customer_id: number;
+  item_id: number | null;
+  style_id: number | null;
+  label: string | null;
+  notify_email: number;
+  notify_sms: number;
+  notified_at: string | null;
+  created_at: string;
+};
+
+export type Referral = {
+  id: number;
+  code: string;
+  referrer_customer_id: number;
+  referee_customer_id: number | null;
+  referee_sale_id: number | null;
+  reward_credit_cents: number;
+  status: "pending" | "redeemed" | "expired";
+  redeemed_at: string | null;
+  created_at: string;
+};
+
+export type Commission = {
+  id: number;
+  sale_id: number;
+  staff_id: number;
+  percent: number;
+  amount_cents: number;
+  paid_at: string | null;
+  created_at: string;
+};
+
+export type CorporateAccount = {
+  id: number;
+  name: string;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  billing_email: string | null;
+  stipend_cents: number;
+  stipend_period: "annual" | "quarterly" | "monthly";
+  notes: string | null;
+  created_at: string;
+};
+
+export type CorporateEmployee = {
+  id: number;
+  account_id: number;
+  customer_id: number | null;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  role: string | null;
+  stipend_balance_cents: number;
+  created_at: string;
+};
+
+export type DripFlow = {
+  id: number;
+  name: string;
+  description: string | null;
+  trigger: "manual" | "new_customer" | "post_purchase" | "lapsed_180" | "birthday";
+  active: number;
+  created_at: string;
+};
+
+export type DripFlowStep = {
+  id: number;
+  flow_id: number;
+  sequence: number;
+  delay_days: number;
+  channel: "email" | "sms";
+  subject: string | null;
+  body: string;
+};
+
+export type DripEnrollment = {
+  id: number;
+  flow_id: number;
+  customer_id: number;
+  enrolled_at: string;
+  next_step: number;
+  next_run_at: string | null;
+  status: "active" | "paused" | "complete";
+};
+
+export type LookbookEntry = {
+  id: number;
+  item_id: number | null;
+  style_id: number | null;
+  title: string;
+  caption: string;
+  hashtags: string | null;
+  image_url: string | null;
   created_at: string;
 };
 

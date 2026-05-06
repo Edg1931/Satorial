@@ -66,7 +66,6 @@ export default function NewAppointmentForm({
           <option value="custom_suit">Custom suit</option>
           <option value="rental">Rental</option>
           <option value="fitting">Fitting</option>
-          <option value="alteration">Alteration</option>
           <option value="consultation">Consultation</option>
         </select>
       </Field>

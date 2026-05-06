@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { Card, Chip, PageHeader, Stat } from "@/components/ui";
 import { dollars, relativeDate, shortDate, shortDateTime } from "@/lib/format";
 import type { Appointment, GroupOrder } from "@/lib/types";
+import PortalLink from "./portal-link";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export default function GroupDetail({ params }: { params: { id: string } }) {
   const g = conn.prepare("SELECT * FROM group_orders WHERE id = ?").get(params.id) as GroupOrder | undefined;
   if (!g) notFound();
   const members = conn.prepare("SELECT * FROM appointments WHERE group_order_id = ? ORDER BY customer_name").all(g.id) as Appointment[];
+  const portal = conn.prepare("SELECT token FROM wedding_portals WHERE group_order_id = ?").get(g.id) as { token: string } | undefined;
   const ready = members.filter((m) => m.stage === "ready" || m.stage === "delivered").length;
   const total = members.reduce((a, b) => a + b.total_cents, 0);
   const balance = members.reduce((a, b) => a + b.balance_cents, 0);
@@ -31,6 +33,10 @@ export default function GroupDetail({ params }: { params: { id: string } }) {
         <Stat label="Group total" value={dollars(total)} />
         <Stat label="Outstanding balance" value={dollars(balance)} tone={balance > 0 ? "warn" : "good"} />
       </div>
+
+      <Card title="Self-service portal" className="mb-6">
+        <PortalLink groupId={g.id} token={portal?.token || null} />
+      </Card>
 
       <Card title="Members">
         {members.length === 0 ? (

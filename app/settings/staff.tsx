@@ -4,19 +4,19 @@ import { useRouter } from "next/navigation";
 import type { Staff } from "@/lib/types";
 import { Chip } from "@/components/ui";
 
-const ROLES = ["owner", "manager", "sales", "tailor"];
+const ROLES = ["owner", "manager", "sales", "stylist"];
 
 export default function StaffManager({ staff }: { staff: Staff[] }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
-  const [n, setN] = useState({ name: "", email: "", phone: "", role: "sales", pin: "" });
+  const [n, setN] = useState({ name: "", email: "", phone: "", role: "sales", pin: "", commission_percent: 0 });
   const [busy, setBusy] = useState(false);
 
   async function add() {
     setBusy(true);
     const r = await fetch("/api/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(n) });
     setBusy(false);
-    if (r.ok) { setAdding(false); setN({ name: "", email: "", phone: "", role: "sales", pin: "" }); router.refresh(); }
+    if (r.ok) { setAdding(false); setN({ name: "", email: "", phone: "", role: "sales", pin: "", commission_percent: 0 }); router.refresh(); }
   }
 
   async function toggle(s: Staff) {
@@ -33,7 +33,7 @@ export default function StaffManager({ staff }: { staff: Staff[] }) {
   return (
     <div className="space-y-3">
       <table className="table">
-        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>PIN</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>PIN</th><th>Commission %</th><th>Status</th><th></th></tr></thead>
         <tbody>
           {staff.map((s) => (
             <tr key={s.id}>
@@ -42,6 +42,7 @@ export default function StaffManager({ staff }: { staff: Staff[] }) {
               <td>{s.phone || "—"}</td>
               <td><Chip tone={s.role === "owner" ? "accent" : undefined}>{s.role}</Chip></td>
               <td className="mono">{s.pin || "—"}</td>
+              <td className="mono">{(s.commission_percent ?? 0).toFixed(1)}%</td>
               <td>{s.active ? <Chip tone="good">Active</Chip> : <Chip>Off</Chip>}</td>
               <td className="text-right space-x-1">
                 <button className="btn text-xs" onClick={() => toggle(s)}>{s.active ? "Deactivate" : "Activate"}</button>
@@ -53,7 +54,7 @@ export default function StaffManager({ staff }: { staff: Staff[] }) {
       </table>
 
       {adding ? (
-        <div className="rounded-lg border border-[var(--line-soft)] p-3 grid md:grid-cols-5 gap-2">
+        <div className="rounded-lg border border-[var(--line-soft)] p-3 grid md:grid-cols-6 gap-2">
           <input className="input" placeholder="Name" value={n.name} onChange={(e) => setN({ ...n, name: e.target.value })} />
           <input className="input" placeholder="Email" value={n.email} onChange={(e) => setN({ ...n, email: e.target.value })} />
           <input className="input" placeholder="Phone" value={n.phone} onChange={(e) => setN({ ...n, phone: e.target.value })} />
@@ -61,7 +62,8 @@ export default function StaffManager({ staff }: { staff: Staff[] }) {
             {ROLES.map((r) => <option key={r}>{r}</option>)}
           </select>
           <input className="input mono" placeholder="4-digit PIN" maxLength={4} value={n.pin} onChange={(e) => setN({ ...n, pin: e.target.value.replace(/\D/g, "") })} />
-          <div className="md:col-span-5 flex justify-end gap-2">
+          <input className="input mono" placeholder="Commission %" type="number" step="0.1" value={n.commission_percent} onChange={(e) => setN({ ...n, commission_percent: Number(e.target.value) })} />
+          <div className="md:col-span-6 flex justify-end gap-2">
             <button className="btn" onClick={() => setAdding(false)}>Cancel</button>
             <button disabled={busy} className="btn btn-primary" onClick={add}>{busy ? "…" : "Add"}</button>
           </div>

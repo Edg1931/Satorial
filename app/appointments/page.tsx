@@ -53,7 +53,6 @@ export default function AppointmentsPage({ searchParams }: { searchParams: Searc
           <option value="rental">Rental</option>
           <option value="fitting">Fitting</option>
           <option value="consultation">Consultation</option>
-          <option value="alteration">Alteration</option>
         </select>
         <select name="stage" defaultValue={searchParams.stage || "all"} className="select w-44">
           <option value="all">All stages</option>
